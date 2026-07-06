@@ -179,6 +179,10 @@ tr.buzz-row td { background: rgba(224,175,104,.06); }
       <div class="bar-wrap"><div class="bar-fill" id="frac-fill" style="width:0%;background:var(--purple)"></div></div>
       <span class="bar-val" id="frac-val"></span>
     </div>
+    <div class="sr" id="reasoning-row" style="display:none">
+      <span class="sl">Thinking</span>
+      <span id="reasoning-val" style="color:var(--dim);font-style:italic;font-size:13px;line-height:1.5"></span>
+    </div>
     <div class="buzz-alert" id="buzz-alert">⚡ BUZZ</div>
   </div>
 
@@ -249,6 +253,15 @@ function updateState(d) {
   // frac bar
   document.getElementById('frac-fill').style.width = (d.frac * 100) + '%';
   document.getElementById('frac-val').textContent = Math.round(d.frac * 100) + '% heard';
+
+  const rrow = document.getElementById('reasoning-row');
+  const rval = document.getElementById('reasoning-val');
+  if (d.reasoning) {
+    rval.textContent = d.reasoning;
+    rrow.style.display = '';
+  } else {
+    rrow.style.display = 'none';
+  }
 
   const alert = document.getElementById('buzz-alert');
   if (firstBuzz !== null) {

@@ -1,9 +1,10 @@
 """LeBot interactive demo server.
 POST /analyze  {prefix, category, total_words, history:[{guess,mode}]}
-            -> {guess, mode, stability_run, churn, frac, p_buzz, buzzes}
+            -> {guess, mode, stability_run, churn, frac, p_buzz, buzzes, reasoning}
 GET  /       -> lebot.html
 """
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -49,7 +50,12 @@ def index():
 
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
-    guess, mode = answerer.anticipate_best(req.prefix, req.category, n=3)
+    # run main guess + verbose reasoning in parallel (no added latency)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_guess = ex.submit(answerer.anticipate_best, req.prefix, req.category, 3)
+        f_verbose = ex.submit(answerer.anticipate_sa_verbose, req.prefix, req.category)
+        guess, mode = f_guess.result()
+        reasoning, _ = f_verbose.result()
 
     words_heard = len(req.prefix.split())
     total = max(req.total_words, words_heard)
@@ -87,4 +93,5 @@ def analyze(req: AnalyzeReq):
         "frac": round(frac, 3),
         "p_buzz": round(p, 3),
         "buzzes": p >= BUZZ_T,
+        "reasoning": reasoning if mode == "recall" else "Computed via Python sandbox.",
     }
