@@ -134,13 +134,14 @@ def _analyze_mc(req: FullReq, words, total, indices):
     empirical letter prior. Shows the blind-prior baseline (no stem) so you can SEE
     anticipation — the letter diverging from the pure option-prior is the real signal."""
     opts = req.options
-    # blind prior once (no stem): the pure option/category prior to beat
-    blind_letters = answerer.blind(opts, req.category, n=5)
+    # blind prior once (no stem): the pure option/category prior to beat. Same model
+    # (Sonnet) as the stem-guess so the comparison isolates what the STEM adds.
+    blind_letters = answerer.blind(opts, req.category, n=5, model=answerer.MODEL)
     blind_letter, blind_conf = answerer.consensus_debiased(blind_letters, "", opts)
 
     def one(widx):
         prefix = " ".join(words[:widx])
-        letters = answerer.anticipate(prefix, opts, req.category, n=5)
+        letters = answerer.guess(prefix, opts, req.category, n=5)
         letter, conf = answerer.consensus_debiased(letters, prefix, opts)
         val = opts[MC_LETTERS.index(letter)] if letter in MC_LETTERS else None
         return {"widx": widx, "letter": letter, "conf": conf, "option": val,
@@ -161,10 +162,18 @@ def _analyze_mc(req: FullReq, words, total, indices):
         if letter:
             seen.add(letter)
         diverges = letter is not None and letter != blind_letter
-        # prior-aware: buzzing on an answer that just echoes the blind prior needs MORE
-        # confidence; a divergent (anticipated) answer is trusted at the base threshold
-        eff_T = BUZZ_T if diverges else min(0.96, BUZZ_T + 0.15)
-        buzzes = letter is not None and r["conf"] >= eff_T and run >= 2
+        frac = r["widx"] / total
+        # PRIOR-AWARE buzz. Self-consistency confidence is uncalibrated (Sonnet saturates
+        # at 1.0 even when it's just echoing the option-prior), so confidence alone can't
+        # gate. A DIVERGENT answer means the stem moved the model off its blind prior ->
+        # trust it and buzz early. An answer that merely ECHOES the blind prior is
+        # indistinguishable from a blind guess until late -> require most of the stem.
+        if letter is None:
+            buzzes = False
+        elif diverges:
+            buzzes = r["conf"] >= BUZZ_T and run >= 2
+        else:
+            buzzes = r["conf"] >= BUZZ_T and run >= 2 and frac >= 0.66
         guess = f"{letter} — {r['option']}" if letter else "UNKNOWN"
         steps.append({
             "widx": r["widx"], "guess": guess, "letter": letter, "option": r["option"],

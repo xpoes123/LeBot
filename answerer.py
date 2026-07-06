@@ -435,12 +435,12 @@ def judge(pred, gold):
     return r.strip().upper().startswith("Y")
 
 
-def blind(options, category, n=5):
+def blind(options, category, n=5, model=None):
     """Control arm: guess from the options + category with NO stem at all.
 
     Measures the pure MC option-prior. If anticipation only matches this, the stem
     added nothing — the bot is just exploiting test-taking priors, not anticipating.
-    Same fast model as anticipate(), so it's a fair control. Returns n letters.
+    Pass the SAME model used for the stem-guess so the control is fair. Returns n letters.
     """
     opts = "\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options))
 
@@ -449,7 +449,7 @@ def blind(options, category, n=5):
             "You are guessing a multiple-choice answer with NO question, only options.",
             f"Category: {category}. Options:\n{opts}\n\nYou have NOT heard the "
             "question. Guess the most likely correct option. Reply ONLY W/X/Y/Z.",
-            max_tokens=16, temperature=0.8, model=FAST,
+            max_tokens=16, temperature=0.8, model=model or FAST,
         ).upper()
         return letter[0] if letter and letter[0] in LETTERS else "NONE"
 
