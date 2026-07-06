@@ -1,0 +1,13 @@
+[Unit]
+Description=LeBot interactive demo
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/lebot
+EnvironmentFile=/opt/lebot/.env
+ExecStart=/opt/lebot/venv/bin/uvicorn server:app --host 127.0.0.1 --port 7785
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

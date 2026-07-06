@@ -1,0 +1,429 @@
+"""The brain. Stem-first, the way an elite Science Bowl player actually plays:
+
+  1. predict the answer from the STEM ALONE (blind to the options) -> commits to
+     knowledge instead of pattern-matching whichever option looks best.
+  2. map that prediction onto W/X/Y/Z.
+
+Confidence = self-consistency on the *letter*: sample the stem-answer N times, map
+each to a letter, fraction agreeing = confidence. Anthropic exposes no logprobs, so
+sampling is the only calibrated signal. Letter-level agreement (not phrase-level)
+absorbs harmless wording differences ("mitochondria" vs "the mitochondrion").
+"""
+
+import os
+import re
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+
+import anthropic
+
+LETTERS = ["W", "X", "Y", "Z"]
+MODEL = os.environ.get("LEBOT_MODEL", "claude-sonnet-4-6")       # System 2: thinking
+FAST = os.environ.get("LEBOT_FAST", "claude-haiku-4-5-20251001")  # System 1: subconscious
+_client = None  # lazy: so consensus()/LETTERS import without an API key (--dry)
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
+    return _client
+
+SB_CONTEXT = """The U.S. National Science Bowl is a prestigious academic quiz \
+competition for high-school teams; its questions are rigorous and routinely reach \
+early-college material (modern physics, organic chemistry, multivariable calculus, \
+biochemistry, named theorems and phenomena). Every question has ONE specific intended \
+answer — a precise scientific term, name, law, constant, value, or named phenomenon \
+(e.g. "tetrahedral", "Avogadro constant", "allosteric inhibition"), never a vague \
+description. Reach for the specific advanced concept, not a generic one."""
+
+# The Science Bowl meta, imparted to the model. Tier 1 = how you win; Tier 2 =
+# last-resort tells used ONLY when the science is unknown.
+META = SB_CONTEXT + """ You are an elite player answering a MULTIPLE-CHOICE \
+toss-up worth 4 points, in a live buzz race against other experts. The moderator \
+reads the question stem, then four options aloud in order: W, X, Y, Z. You may buzz \
+the instant you know the answer.
+
+How elite players win:
+- KNOW IT FROM THE STEM. Most non-computational questions ("...is called what?", \
+"which structure does X?") have one answer you can name before any option is read. \
+Decide from the stem, then buzz the moment the matching option is read, even if it \
+is the first one.
+- COMPUTE ONLY WHEN FORCED. If the question needs a calculation, hear it fully.
+- NEGATION FLIPS EVERYTHING. Watch for NOT / EXCEPT / LEAST / INCORRECT; the answer \
+is the odd one out.
+- "BEST describes/explains" means several options are plausible; choose the most \
+precise and complete, not merely true.
+
+Last-resort tells, ONLY when you do not know the science:
+- Options are usually structured: numbers in order (watch units and orders of \
+magnitude), or one textbook-correct term among plausible-sounding distractors.
+- Prefer the most specific, technically precise option; eliminate options that are \
+true statements but do not answer THIS question.
+- When you DO know the science, ignore option structure and answer from knowledge.
+
+Category for this question: {category}."""
+
+
+def _norm(s):
+    return s.strip().strip(".").lower()
+
+
+def subconscious(prefix, category):
+    """System 1: fast gut answer on a partial question. Haiku, temp 0, ~250ms.
+
+    Returns a short normalized phrase, or None if it can't tell yet. Run this on
+    every word tick; the answer holding stable across ticks IS the confidence.
+    """
+    text = _call(
+        "You are an elite Science Bowl player's gut instinct. Answer fast.",
+        f"Category: {category}. Partial Science Bowl question (may be cut off):\n"
+        f"{prefix}\n\nYour single best 1-3 word answer, or '?' if you cannot tell yet.",
+        max_tokens=16, temperature=0.0, model=FAST,
+    )
+    n = _norm(text)
+    return None if not n or n.startswith("?") else n
+
+
+def gate(prefix, options, category):
+    """The BUZZER (System 1). Not an answerer: judges 'is this gettable yet?'.
+
+    Haiku, every word, temp 0. Options are known up front; only the stem streams in.
+    -> True if a top player could already commit to an answer. v0 = prompt; v1 = a
+    classifier trained on buzzes.csv word_index.
+    """
+    opts = "\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options))
+    text = _call(
+        "You are a National Science Bowl buzzer reflex. You do NOT answer; you only "
+        "decide whether there is now enough information to buzz.",
+        f"Category: {category}. The four options are known:\n{opts}\n\n"
+        f"Question stem heard SO FAR (more words may follow):\n{prefix}\n\n"
+        "Could a top player already pick the correct option with confidence? "
+        "Reply YES or NO only.",
+        max_tokens=8, temperature=0.0, model=FAST,
+    )
+    return text.strip().upper().startswith("Y")
+
+
+def anticipate(prefix, options, category, n=5):
+    """Question anticipation (the core idea). Given a CUT-OFF stem, predict where the
+    question is going and which option it will land on. Sampled n times.
+
+    Agreement across samples = confidence: once the identifying clue is heard, every
+    plausible completion converges on one option -> buzz, even mid-sentence.
+    Returns n letters (each W/X/Y/Z or 'NONE'). Uses the fast model (runs every word).
+    """
+    opts = "\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options))
+    system = META.format(category=category)
+
+    def one(_):
+        letter = _call(
+            system,
+            f"This Science Bowl question is CUT OFF mid-reading:\n\"{prefix}...\"\n\n"
+            f"Options (known in advance):\n{opts}\n\n"
+            "Anticipate how the question will finish and which option it is heading "
+            "toward. If the answer is already determined, give its letter; if it is "
+            "still ambiguous, reply NONE. Reply with ONLY W, X, Y, Z, or NONE.",
+            max_tokens=16, temperature=0.8, model=FAST,
+        ).upper()
+        return letter[0] if letter and letter[0] in LETTERS else "NONE"
+
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        return list(ex.map(one, range(n)))
+
+
+META_SA = SB_CONTEXT + """ You are an elite player answering a SHORT-ANSWER toss-up in \
+a live buzz race. Toss-ups are pyramidal: early words give general clues that narrow to \
+one answer, so commit as soon as the answer is determined, before the question finishes. \
+Recall questions are often answerable from the key concept alone; computational \
+questions need the full setup. There is a POINT PENALTY for a wrong interrupt, so only \
+commit when genuinely confident. Category: {category}."""
+
+
+def _clean_answer(r):
+    """Force terse: a buzz answer is a term/value, never a sentence/explanation."""
+    r = r.strip().strip('"').strip("#* ").strip()
+    if not r or r.upper().startswith("UNKNOWN"):
+        return "UNKNOWN"
+    r = r.split("\n")[0]
+    r = re.split(r"\s+(?:\(|—|–| - |, which| because| since| is | are | refers)", r)[0]
+    r = r.strip().strip(".").strip()
+    # a real short answer is brief; a long string means it explained -> not a clean commit
+    return "UNKNOWN" if len(r.split()) > 7 or not r else r
+
+
+def anticipate_sa(prefix, category, n=1):
+    """Short-answer anticipation: predict the free-text answer from a cut-off stem.
+    Returns n predictions (each a TERSE answer, or 'UNKNOWN')."""
+    sys = META_SA.format(category=category)
+
+    def one(_):
+        r = _call(
+            sys,
+            f"This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
+            "Give ONLY the answer itself — a single term, name, or value, at most a few "
+            "words (e.g. \"mitochondria\", \"contact metamorphism\", \"36 mph\"). "
+            "NO sentence, NO explanation, do not write \"X is...\". "
+            "If not yet determinable, reply UNKNOWN.\nAnswer:",
+            max_tokens=12, temperature=0.7,
+        )
+        return _clean_answer(r)
+
+    if n == 1:
+        return [one(0)]
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        return list(ex.map(one, range(n)))
+
+
+import math
+from fractions import Fraction
+
+# whitelisted namespace for executing model-written calculation code (no builtins)
+_SAFE = {"Fraction": Fraction, "math": math, "sqrt": math.sqrt, "pi": math.pi,
+         "e": math.e, "log": math.log, "log2": math.log2, "log10": math.log10,
+         "exp": math.exp, "factorial": math.factorial, "comb": math.comb,
+         "perm": math.perm, "sin": math.sin, "cos": math.cos, "tan": math.tan,
+         "radians": math.radians, "degrees": math.degrees, "gcd": math.gcd,
+         "abs": abs, "round": round, "sum": sum, "min": min, "max": max,
+         "pow": pow, "range": range, "len": len, "int": int, "float": float}
+
+
+def _fmt(a):
+    if isinstance(a, Fraction):
+        return str(a.numerator) if a.denominator == 1 else f"{a.numerator}/{a.denominator}"
+    if isinstance(a, float):
+        return str(int(a)) if a == int(a) else f"{a:.4g}"
+    return str(a)
+
+
+_ALLOWED_MODS = {"math", "fractions", "itertools", "statistics", "cmath", "decimal"}
+
+
+def _safe_import(name, *a, **k):
+    if name.split(".")[0] in _ALLOWED_MODS:
+        return __import__(name, *a, **k)
+    raise ImportError(name)
+
+
+def _calc(code):
+    # ponytail: sandbox = restricted builtins (only safe math imports) + whitelist ns
+    safe_builtins = {"__import__": _safe_import, "print": lambda *a, **k: None,
+                     "range": range, "len": len, "int": int, "float": float,
+                     "abs": abs, "round": round, "sum": sum, "min": min, "max": max,
+                     "pow": pow, "enumerate": enumerate, "list": list, "map": map,
+                     "zip": zip, "sorted": sorted, "set": set, "dict": dict, "tuple": tuple}
+    ns = {"__builtins__": safe_builtins}
+    ns.update(_SAFE)
+    exec(code, ns)
+    return ns.get("answer")
+
+
+def solve(prefix, category, use_opus=False):
+    """If `prefix` is a computational question with all numbers present, COMPUTE the
+    answer (model writes Python -> we execute it). Returns a formatted answer, or None
+    if it's not computational / numbers missing / code failed.
+
+    use_opus routes the setup to Opus for harder reasoning; the calculator does the
+    arithmetic either way so the answer is exact, not eyeballed.
+    """
+    model = "claude-opus-4-8" if use_opus else MODEL
+    r = _call(
+        "You solve National Science Bowl computational questions by writing Python. "
+        f"Category: {category}.",
+        f"Question (may be cut off mid-reading):\n\"{prefix}\"\n\n"
+        "If this is a COMPUTATIONAL question AND every number needed is already present "
+        "(numbers may be mangled like '2/3'->'23' — reconstruct sensible fractions if "
+        "obvious), write Python that assigns the result to `answer`, using "
+        "fractions.Fraction for exact ratios. Output ONLY a ```python code block. "
+        "If it is not computational, or required numbers are missing/ambiguous, output "
+        "exactly NOTCOMPUTABLE.",
+        max_tokens=500, temperature=0.0, model=model,
+    )
+    if "NOTCOMPUTABLE" in r.upper():
+        return None
+    m = re.search(r"```(?:python)?\s*(.*?)```", r, re.DOTALL)
+    code = m.group(1) if m else r
+    try:
+        a = _calc(code)
+    except Exception:
+        return None
+    return _fmt(a) if a is not None else None
+
+
+def anticipate_sa_verbose(prefix, category):
+    """Same anticipation, but capture the reasoning too (for walkthroughs).
+    -> (reasoning_sentence, terse_answer)."""
+    raw = _call(
+        META_SA.format(category=category),
+        f"This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
+        "FIRST line, exactly: ANSWER: <a terse answer, or UNKNOWN>\n"
+        "SECOND line: one short sentence explaining your reasoning.",
+        max_tokens=120, temperature=0.7,
+    )
+    if "ANSWER:" in raw.upper():
+        after = raw[raw.upper().index("ANSWER:") + 7:]
+        parts = after.split("\n", 1)
+        reasoning = parts[1].strip() if len(parts) > 1 else ""
+        return reasoning, _clean_answer(parts[0])
+    return raw.strip(), "UNKNOWN"  # no clean ANSWER line -> don't leak reasoning as answer
+
+
+def _vote(cands):
+    """Majority vote over terse answers (gut self-consistency). Reasoning can derail
+    the model off an answer its gut knows; voting recovers it (brachistochrone: 7/8)."""
+    counts, rep = Counter(), {}
+    for a in cands:
+        if a.upper() == "UNKNOWN":
+            continue
+        k = _norm(a)
+        counts[k] += 1
+        rep.setdefault(k, a)
+    return rep[counts.most_common(1)[0][0]] if counts else "UNKNOWN"
+
+
+def anticipate_best(prefix, category, n=3):
+    """Router: numbers present -> COMPUTE (calculator, exact); else recall via
+    majority-voted gut answers. -> (answer, mode='calc'|'recall'). The calculator
+    returns None until enough numbers are present, so it waits for the operative ones."""
+    if any(ch.isdigit() for ch in prefix):
+        v = solve(prefix, category)
+        if v is not None:
+            return v, "calc"
+    return _vote(anticipate_sa(prefix, category, n=n)), "recall"
+
+
+def judge(pred, gold):
+    """Semantic correctness for short answer (synonyms/equivalent forms count)."""
+    if not pred or pred.upper() == "UNKNOWN":
+        return False
+    if _norm(pred) == _norm(gold):
+        return True
+    # rescue pdftotext-mangled fractions: gold "4/5" was scanned as "45"
+    dp, dg = re.sub(r"\D", "", pred), re.sub(r"\D", "", gold)
+    if dp and dp == dg and (("/" in pred) != ("/" in gold)):
+        return True
+    r = _call(
+        "You judge National Science Bowl short answers. Equivalent forms, synonyms, "
+        "and correct values (any units) count as correct; be reasonably lenient.",
+        f"Expected answer: {gold}\nContestant said: {pred}\n\nIs it correct? YES or NO.",
+        max_tokens=4, temperature=0.0, model=FAST,
+    )
+    return r.strip().upper().startswith("Y")
+
+
+def blind(options, category, n=5):
+    """Control arm: guess from the options + category with NO stem at all.
+
+    Measures the pure MC option-prior. If anticipation only matches this, the stem
+    added nothing — the bot is just exploiting test-taking priors, not anticipating.
+    Same fast model as anticipate(), so it's a fair control. Returns n letters.
+    """
+    opts = "\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options))
+
+    def one(_):
+        letter = _call(
+            "You are guessing a multiple-choice answer with NO question, only options.",
+            f"Category: {category}. Options:\n{opts}\n\nYou have NOT heard the "
+            "question. Guess the most likely correct option. Reply ONLY W/X/Y/Z.",
+            max_tokens=16, temperature=0.8, model=FAST,
+        ).upper()
+        return letter[0] if letter and letter[0] in LETTERS else "NONE"
+
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        return list(ex.map(one, range(n)))
+
+
+def guess(prefix, options, category, n=5):
+    """The GUESSER (System 2): which letter, from a partial stem + known options."""
+    opts = "\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options))
+    system = META.format(category=category)
+
+    def one(_):
+        letter = _call(
+            system,
+            f"Question stem so far:\n{prefix}\n\nOptions:\n{opts}\n\n"
+            "Which option is correct? Reply with ONLY W, X, Y, Z, or NONE.",
+            max_tokens=5, temperature=0.7,
+        ).upper()
+        return letter[0] if letter and letter[0] in LETTERS else "NONE"
+
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        return list(ex.map(one, range(n)))
+
+
+def _once(m, system, user, max_tokens, temperature):
+    kw = dict(
+        model=m, max_tokens=max_tokens,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": user}],
+    )
+    if not m.startswith("claude-opus-4-8"):  # opus 4.8 deprecates temperature
+        kw["temperature"] = temperature
+    return _get_client().messages.create(**kw)
+
+
+def _text(msg):
+    for b in msg.content:  # skip non-text blocks; tolerate empty content
+        if getattr(b, "type", None) == "text":
+            return b.text.strip()
+    return ""
+
+
+def _call(system, user, max_tokens, temperature, model=None):
+    m = model or MODEL
+    msg = _once(m, system, user, max_tokens, temperature)
+    # Sonnet over-refuses benign science (pathogens, toxins) with stop_reason=refusal
+    # and empty content. Haiku refuses far less — fall back so we don't silently abstain.
+    if (msg.stop_reason == "refusal" or not _text(msg)) and m != FAST:
+        msg = _once(FAST, system, user, max_tokens, temperature)
+    return _text(msg)
+
+
+def _predict_then_locate(stem, options, category):
+    """One sample: answer the stem blind, then map to a letter (or NONE)."""
+    system = META.format(category=category)
+    phrase = _call(
+        system,
+        f"Question stem (options NOT yet revealed):\n{stem}\n\n"
+        "Answer the question in a few words. If it requires a calculation you cannot "
+        "do yet, or you cannot answer without seeing the options, reply NEEDOPTIONS.",
+        max_tokens=30, temperature=0.8,
+    )
+    if "NEEDOPTIONS" in phrase.upper():
+        return "NONE"
+    opts = "\n".join(f"{LETTERS[i]}. {o}" for i, o in enumerate(options))
+    letter = _call(
+        system,
+        f"Question: {stem}\n\nOptions:\n{opts}\n\nYour intended answer: {phrase}\n\n"
+        "Which option letter matches your answer? Reply with ONLY W, X, Y, Z, or NONE.",
+        max_tokens=16, temperature=0.0,
+    ).upper()
+    return letter[0] if letter and letter[0] in LETTERS else "NONE"
+
+
+def predict_letters(stem, options, category, n=5):
+    """-> list of n letters (each in W/X/Y/Z or 'NONE')."""
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        return list(ex.map(
+            lambda _: _predict_then_locate(stem, options, category), range(n)))
+
+
+def consensus(letters):
+    """-> (modal_letter or None, confidence). NONE votes count against confidence."""
+    counts = Counter(x for x in letters if x != "NONE")
+    if not counts:
+        return None, 0.0
+    letter, k = counts.most_common(1)[0]
+    return letter, k / len(letters)
+
+
+if __name__ == "__main__":
+    ls = predict_letters(
+        "What is the powerhouse of the cell?",
+        ["Nucleus", "Mitochondrion", "Ribosome", "Golgi apparatus"],
+        "BIOLOGY", n=5,
+    )
+    letter, conf = consensus(ls)
+    print(f"letters={ls} -> {letter} @ {conf}")
+    assert letter == "X", f"expected X (Mitochondrion), got {letter}"
+    print("ok")
