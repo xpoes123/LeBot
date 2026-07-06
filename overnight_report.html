@@ -135,8 +135,27 @@ Sonnet-primary pipeline (calc-router + list-guard + necessity-nudge + refusal-fa
 stale labels the old buzzer was trained on, then retrained the LogisticRegression buzzer.</p>
 <p style="color:var(--dim)"><b>Note:</b> the server's "haiku_vote" is a misnomer — <code>anticipate_sa</code>
 already runs on Sonnet (the default model). The real win of the retrain is that the labels now reflect
-the current answerer behavior, not a months-old pipeline.</p>
-<p id="buzzer-results" class="mono" style="color:var(--yellow)">[buzzer retrain metrics fill in when regen + retrain complete]</p>
+the current answerer behavior (calc-router, list-guard, necessity-nudge, refusal-fallback), not a
+months-old pipeline. Regenerated 296 questions × per-word prefixes on the VPS overnight.</p>
+<table>
+<tr><th>Metric</th><th>Old labels</th><th>New (Sonnet pipeline)</th></tr>
+<tr><td>ECE (calibration error, lower=better)</td><td class="mono">0.080</td><td class="mono" style="color:var(--green)">0.044</td></tr>
+<tr><td>ev/q @ T=0.7</td><td class="mono">+0.09</td><td class="mono" style="color:var(--green)">+1.44</td></tr>
+<tr><td>ev/q @ T=0.8</td><td class="mono">+0.80</td><td class="mono" style="color:var(--green)">+1.66</td></tr>
+<tr><td>ev/q @ T=0.9</td><td class="mono">+1.33</td><td class="mono" style="color:var(--green)">+2.16</td></tr>
+<tr><td>accuracy when buzzing @ T=0.8</td><td class="mono">62%</td><td class="mono" style="color:var(--green)">73%</td></tr>
+<tr><td><code>is_calc</code> feature weight</td><td class="mono">−0.08</td><td class="mono" style="color:var(--green)">+0.45</td></tr>
+</table>
+<p>Calibration error <b>nearly halved</b>; EV at the operating threshold went from break-even to
+<b>+1.44 points/question</b>. The <code>is_calc</code> weight flipped positive — the buzzer now correctly
+<i>trusts</i> computed (calculator) answers instead of distrusting them. New labels are live in production.</p>
+</div>
+
+<div class="card win">
+<h3>Backtest: no regression, buzzer improved</h3>
+List-question accuracy held at <b>21/22 (95%)</b> after all the prompt changes (measured
+production-representative: Sonnet-verbose primary, the path the demo actually shows). None-cases 2/2.
+The one miss is a genuine C-language knowledge error, not a format bug.
 </div>
 
 <h2 id="correction">5. One correction for you <span class="tag tag-rule">RULE</span></h2>
