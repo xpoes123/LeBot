@@ -44,9 +44,17 @@ class AnalyzeReq(BaseModel):
     history: list[_Step] = []
 
 
+_nsba4 = json.loads(Path("nsba4_questions.json").read_text())
+
+
 @app.get("/")
 def index():
     return HTMLResponse(Path("lebot.html").read_text())
+
+
+@app.get("/questions/nsba4")
+def nsba4_questions():
+    return {"questions": _nsba4}
 
 
 @app.post("/analyze")

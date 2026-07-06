@@ -41,6 +41,13 @@ header a:hover { color: var(--purple); }
 /* Main */
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
+/* Question picker */
+.picker-bar { padding: 10px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; background: var(--bg2); }
+.picker-bar select { flex: 1; max-width: 420px; }
+.picker-bar button { padding: 6px 12px; font-size: 13px; }
+.round-pill { font-size: 11px; padding: 1px 6px; border-radius: 3px; background: var(--bg3); color: var(--blue); margin-right: 4px; }
+.subject-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+
 /* Input panel */
 .input-panel { padding: 20px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 textarea {
@@ -140,6 +147,20 @@ tr:hover td { background: rgba(255,255,255,.03); }
 
   <!-- Main -->
   <div class="main">
+
+    <!-- Question picker -->
+    <div class="picker-bar">
+      <span style="color:var(--dim);font-size:12px;white-space:nowrap">NSBA 4</span>
+      <select id="q-picker" onchange="loadPickedQuestion(this.value)" style="flex:1;max-width:500px">
+        <option value="">— pick a question —</option>
+      </select>
+      <select id="q-filter" onchange="filterPicker(this.value)" style="width:120px">
+        <option value="">All rounds</option>
+        <option value="1">Round 1</option>
+        <option value="2">Round 2</option>
+        <option value="3">Round 3</option>
+      </select>
+    </div>
 
     <!-- Input -->
     <div class="input-panel">
@@ -475,8 +496,42 @@ function jumpTo(i) {
 
 function setSpeed(ms) { playSpeed = ms; }
 
+// ── Question picker ────────────────────────────────────────────────────────
+let nsba4 = [];
+const SUBJ_COLORS = {BIOLOGY:'#9ece6a',CHEMISTRY:'#7dcfff',PHYSICS:'#bb9af7',EARTH_SPACE:'#e0af68',MATH:'#ff9e64',ENERGY:'#f7768e',OTHER:'#565f89'};
+
+async function loadNsba4() {
+  try {
+    const res = await fetch('/questions/nsba4');
+    const data = await res.json();
+    nsba4 = data.questions;
+    filterPicker('');
+  } catch(e) { console.error('failed to load nsba4', e); }
+}
+
+function filterPicker(roundFilter) {
+  const sel = document.getElementById('q-picker');
+  const filtered = roundFilter ? nsba4.filter(q => String(q.round) === roundFilter) : nsba4;
+  sel.innerHTML = '<option value="">— pick a question —</option>' +
+    filtered.map(q => {
+      const fmt = q.format === 'multiple_choice' ? 'MC' : 'SA';
+      const label = `R${q.round} Q${q.number} [${q.subject.slice(0,4).toUpperCase()}] [${fmt}] ${q.stem.slice(0,70)}${q.stem.length>70?'…':''}`;
+      return `<option value="${q.id}">${esc(label)}</option>`;
+    }).join('');
+}
+
+function loadPickedQuestion(id) {
+  if (!id) return;
+  const q = nsba4.find(x => String(x.id) === id);
+  if (!q) return;
+  document.getElementById('stem-input').value = q.stem;
+  document.getElementById('cat-sel').value = q.category;
+  document.getElementById('gold-input').value = q.answer;
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────
 renderSidebar();
+loadNsba4();
 </script>
 </body>
 </html>
