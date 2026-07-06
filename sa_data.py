@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import answerer
 
 CLEAN = os.path.join(os.path.dirname(__file__), "packets", "questions_clean.json")
-OUT = os.path.join(os.path.dirname(__file__), "sa_labels.json")
+OUT = os.environ.get("SA_OUT", os.path.join(os.path.dirname(__file__), "sa_labels.json"))
 STRIDE = 3
 PER_TOURNAMENT = 25   # cap to spread the ~300 across many tournaments
 TARGET = 300
