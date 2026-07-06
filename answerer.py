@@ -175,14 +175,22 @@ def _clean_answer(r):
     if not r or r.upper().startswith("UNKNOWN"):
         return "UNKNOWN"
     r = r.split("\n")[0]
+    # drop a lead-in like "The answer is" / "Answer:" the model sometimes prepends
+    r = re.sub(r"(?i)^(the\s+)?answer\s+is\s*:?\s*|^answer\s*:\s*", "", r).strip()
     r = re.split(r"\s+(?:\(|—|–| - |, which| because| since| is | are | refers)", r)[0]
     r = r.strip().strip(".").strip()
+    if not r:
+        return "UNKNOWN"
     # reasoning leaks: a trailing colon leads into an explanation ("For n = 3:"); a
     # sentence opener followed by more words is a truncated explanation, not a term.
     if r.endswith(":"):
         return "UNKNOWN"
     if re.match(r"(?i)(for|in the|since|because|if|when|as the|according|assuming|"
-                r"we|let|first|note that|given)\b[\s,]+\S+", r):
+                r"we|let|first|note that|given|thus|therefore|so the)\b[\s,]+\S+", r):
+        return "UNKNOWN"
+    # a dangling connective/preposition at the end = truncated mid-phrase, not a clean
+    # term (excludes "a"/"an" so "vitamin A", "plan B" survive)
+    if re.search(r"(?i)\s(and|or|of|the|to|with|for|by|in|on|at|that|which|as)$", r):
         return "UNKNOWN"
     # a real short answer is brief; a long string means it explained -> not a clean commit
     return "UNKNOWN" if len(r.split()) > 7 or not r else r
@@ -531,6 +539,16 @@ def consensus(letters):
         return None, 0.0
     letter, k = counts.most_common(1)[0]
     return letter, k / len(letters)
+
+
+def consensus_debiased(letters, stem=None, options=None):
+    """Like consensus() but blends the votes with the empirical, stem-adjusted MC letter
+    prior (X/Y inflated; negation->Y/Z; closest-to->X/Y; largest-numeric down). Unanimous
+    votes still win; split votes get broken by the prior. -> (letter or None, confidence)."""
+    import mc_prior
+    if not any(l in LETTERS for l in letters):
+        return None, 0.0
+    return mc_prior.debias(letters, stem or "", options)
 
 
 if __name__ == "__main__":

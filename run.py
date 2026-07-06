@@ -52,14 +52,20 @@ def build_trajectories(facts_dir, limit, n):
     return cache
 
 
-def bot_buzz(letters, threshold, delay):
+def bot_buzz(letters, threshold, delay, stem=None, options=None, debias=False):
     """Stem-first buzz: if confident, buzz when the matched option is read.
 
     Buzz step = the position of the modal letter (W=0..Z=3), shifted by latency.
     -> (step, letter) or (None, None) if not confident enough.
+
+    debias=True blends votes with the empirical MC letter prior (mc_prior); default off
+    keeps the reproducible raw-consensus semantics used by the existing experiments.
     """
     import answerer
-    modal, conf = answerer.consensus(letters)
+    if debias:
+        modal, conf = answerer.consensus_debiased(letters, stem, options)
+    else:
+        modal, conf = answerer.consensus(letters)
     if modal is None or conf < threshold:
         return None, None
     return answerer.LETTERS.index(modal) + delay, modal
