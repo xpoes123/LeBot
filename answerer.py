@@ -142,7 +142,14 @@ commit when genuinely confident. Category: {category}.
 CRITICAL — numbered-list questions: when the question presents a numbered list \
 (e.g., "1) Azimuthal; 2) Magnetic; 3) Spin") and asks you to ORDER or IDENTIFY items, \
 give ONLY the item numbers in your answer (e.g., "3, 1, 2" or "1, 3"), never the names. \
-This is the required Science Bowl answer format for these questions."""
+This is the required Science Bowl answer format for these questions.
+
+CRITICAL — "must"/"always"/"necessarily" questions: for "identify all that MUST/ALWAYS \
+[do X]" questions, include an item ONLY if the property is GUARANTEED, not merely \
+possible. A relationship that CAN hold does not mean it MUST (e.g. raising significance \
+raises power, but power can also rise via sample size, so significance need not increase). \
+If none of the items are guaranteed, the answer is "0" (none) — this is a valid and \
+common answer; do not force-pick an item just because the format lists several."""
 
 
 def _clean_answer(r):
@@ -315,11 +322,18 @@ def _list_prior_guess(ans, prefix):
     return any(n not in markers for n in nums)       # references an item not yet shown
 
 
+def _is_list_q(prefix):
+    """A numbered-list (order/identify-all/rank) question — always answered by RECALL
+    as indices, never the calculator (which would return raw values or a list repr)."""
+    return bool(re.search(r"\d\)", prefix)) or any(
+        w in prefix.lower() for w in ("identify all", "order the", "rank the"))
+
+
 def anticipate_best(prefix, category, n=3):
     """Router: numbers present -> COMPUTE (calculator, exact); else recall via
     majority-voted gut answers. -> (answer, mode='calc'|'recall'). The calculator
     returns None until enough numbers are present, so it waits for the operative ones."""
-    if any(ch.isdigit() for ch in prefix):
+    if not _is_list_q(prefix) and any(ch.isdigit() for ch in prefix):
         v = solve(prefix, category)
         if v is not None:
             return v, "calc"
