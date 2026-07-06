@@ -25,7 +25,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 _X, _y, *_ = load_rows()
 _clf = LogisticRegression(max_iter=2000, class_weight="balanced").fit(_X, _y)
 
-BUZZ_T = 0.7  # positive-EV threshold from eval
+BUZZ_T = 0.75  # raised from 0.70 — old threshold was tuned on Haiku-primary data
 
 
 def _norm(s):
@@ -92,11 +92,12 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
     feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
                        np.log1p(total), is_calc] + cat_vec])
     p = float(_clf.predict_proba(feats)[0, 1])
-    agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and haiku_guess else None
-    # Hard gate: if Haiku has no guess at all, there isn't enough info to buzz.
-    # Sonnet can still return a terse answer while its own reasoning says "I'll wait" —
-    # Haiku UNKNOWN is the reliable signal that the stem is incomplete.
     haiku_no_guess = not haiku_guess or haiku_guess.upper() == "UNKNOWN"
+    agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and not haiku_no_guess else None
+    # Both models have guesses but disagree → penalize confidence
+    if agrees is False:
+        p *= 0.6
+    # Hard gate: Haiku UNKNOWN = stem incomplete, don't buzz regardless of P
     return dict(mode=mode, stability_run=run, churn=churn, frac=round(frac, 3),
                 p_buzz=round(p, 3), buzzes=p >= BUZZ_T and not haiku_no_guess,
                 haiku_vote=haiku_guess, agrees=agrees)
