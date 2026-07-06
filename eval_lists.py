@@ -34,11 +34,22 @@ def correct(pred, gold, stem):
     return all(w in pl for w in want)
 
 
+def server_guess(stem, category):
+    """Mirror the server: verbose Sonnet is primary, calc/terse-vote fallback."""
+    haiku_guess, mode = answerer.anticipate_best(stem, category, n=3)
+    _, sonnet_guess = answerer.anticipate_sa_verbose(stem, category)
+    if mode == "calc":
+        return haiku_guess, mode
+    if sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
+        return sonnet_guess, "recall"
+    return haiku_guess, mode
+
+
 hits = 0
 none_hits = 0
 none_total = sum(1 for q in lists if q["answer"].strip() in ("0", "none"))
 for q in lists:
-    ans, mode = answerer.anticipate_best(q["stem"], q["category"], n=3)
+    ans, mode = server_guess(q["stem"], q["category"])
     ok = correct(ans, q["answer"], q["stem"])
     hits += ok
     is_none = q["answer"].strip() in ("0", "none")
