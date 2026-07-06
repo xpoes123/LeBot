@@ -149,9 +149,6 @@ tr:hover td { background: rgba(255,255,255,.03); }
             <option>EARTH_SPACE</option><option>MATH</option><option>ENERGY</option><option>OTHER</option>
           </select>
         </label>
-        <label class="ctrl-label">Every
-          <input type="number" id="stride" value="3" min="1" max="10" style="width:52px"> words
-        </label>
         <button id="analyze-btn" onclick="startAnalysis()">Analyze</button>
         <span class="analyzing-msg" id="analyzing-msg">analyzing…</span>
       </div>
@@ -260,7 +257,7 @@ async function startAnalysis() {
   stopPlay();
   const stem = document.getElementById('stem-input').value.trim();
   const category = document.getElementById('cat-sel').value;
-  const stride = Math.max(1, +document.getElementById('stride').value || 3);
+  const stride = 1;
   if (!stem) return;
 
   document.getElementById('analyze-btn').disabled = true;

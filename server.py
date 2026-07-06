@@ -100,7 +100,7 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
 class FullReq(BaseModel):
     stem: str
     category: str = "BIOLOGY"
-    stride: int = 3
+    stride: int = 1  # per-word by default; parallel so wall-clock time is the same
 
 
 @app.post("/analyze-full")
@@ -131,7 +131,7 @@ def analyze_full(req: FullReq):
         return {"widx": widx, "guess": guess, "mode": mode, "haiku_vote": haiku_guess,
                 "agrees": agrees, "reasoning": reasoning if mode == "recall" else "Computed via Python sandbox."}
 
-    with ThreadPoolExecutor(max_workers=min(len(indices), 8)) as ex:
+    with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
         raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
 
     # Stability/churn/P computed post-hoc over the ordered sequence
