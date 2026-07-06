@@ -169,18 +169,38 @@ There is no rule authorizing a partial or item-omitting answer to "order these".
 real, just scoped to select-all, not ordering.
 </div>
 
-<h2 id="next">6. Proposed next (documented, not built)</h2>
-<ul>
-<li><span class="tag tag-build">BUILD</span> <b>Canonical-sequence ordering solver</b> — ~12–13% of
-ordering questions sit on a fixed monotonic sequence (periodic trends, EM spectrum, Mohs, taxonomy,
-planetary order, geologic time). A small <code>sequences.py</code> + axis-detector would nail these
-deterministically with zero LLM calls. Another ~20% are table-lookup axes (pKa, boiling point).</li>
-<li><span class="tag tag-build">BUILD</span> <b>MC letter-prior de-biasing</b> — feed the W/X/Y/Z skew
-and negation/"closest-to" adjustments into confidence calibration.</li>
-<li><span class="tag tag-build">BUILD</span> <b>Reasoning-leak hardening</b> — <code>_clean_answer</code>
-occasionally lets short reasoning prefixes through ("For n = 3:"). Tighten it.</li>
-<li>The pattern catalog (<code>PATTERNS.md</code>) has the full list with counts.</li>
-</ul>
+<h2 id="next">6. Three more builds — done</h2>
+<p style="color:var(--dim)">The deferred BUILD items are now implemented, tested, and deployed.</p>
+
+<div class="card win">
+<h3>Canonical-sequence ordering solver <code>sequences.py</code></h3>
+For "order/rank by &lt;axis&gt;" questions on a fixed monotonic sequence, computes the index
+permutation with <b>zero LLM calls</b>. Reference tables: electronegativity, covalent radius, first
+ionization energy, Mohs, metamorphic grade, taxonomy, planets, EM spectrum, visible colors.
+Conservative guards (skips ions / 2nd–3rd ionization energy, waits for all declared items, bails on
+ties). <span class="metric">corpus validation <b>26/26 (100%)</b> correct</span> on the ~2.5% of
+ordering questions it fires on. Wired as <code>mode='seq'</code>; the buzzer trusts it like the calculator.
+</div>
+
+<div class="card win">
+<h3>MC letter-prior de-biasing <code>mc_prior.py</code></h3>
+Blends the model's W/X/Y/Z votes with the empirical, stem-adjusted prior (negation→Y/Z, "closest to"→X/Y,
+numeric-sorted middle bias). Validated on 8,241 corpus MC: prior-argmax <b>0.274</b> vs 0.25 uniform;
+negation Y/Z <b>0.584</b>; "closest to" X/Y <b>0.674</b>; largest-value-correct only <b>0.223</b>.
+Opt-in (<code>bot_buzz(debias=True)</code>) so the reproducible experiment harness default is unchanged.
+</div>
+
+<div class="card win">
+<h3>Reasoning-leak hardening <code>_clean_answer</code></h3>
+The terse path sometimes leaks a reasoning prefix ("For n = 3:", "The answer is…") that the buzzer
+shouldn't treat as a commit. Now strips "answer is"/"Answer:" lead-ins and rejects trailing colons,
+sentence-opener prefixes, and dangling connective/preposition endings — while keeping real terms
+("vitamin A", "conservation of energy"). Covered by <code>test_clean.py</code>.
+</div>
+
+<p style="color:var(--dim);font-size:13px">Full pattern catalog with counts: <code>PATTERNS.md</code>.
+Still open (documented): table-lookup ordering axes (pKa, boiling point) need small reference tables;
+MC de-biasing is built but only exercised in letter-mode experiments, not the value-prediction demo.</p>
 
 <div class="card" style="margin-top:30px;color:var(--dim);font-size:13px">
 All work committed to <a href="https://github.com/xpoes121/LeBot">github.com/xpoes123/LeBot</a>
