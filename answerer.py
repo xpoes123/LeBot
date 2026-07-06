@@ -137,7 +137,12 @@ a live buzz race. Toss-ups are pyramidal: early words give general clues that na
 one answer, so commit as soon as the answer is determined, before the question finishes. \
 Recall questions are often answerable from the key concept alone; computational \
 questions need the full setup. There is a POINT PENALTY for a wrong interrupt, so only \
-commit when genuinely confident. Category: {category}."""
+commit when genuinely confident. Category: {category}.
+
+CRITICAL — numbered-list questions: when the question presents a numbered list \
+(e.g., "1) Azimuthal; 2) Magnetic; 3) Spin") and asks you to ORDER or IDENTIFY items, \
+give ONLY the item numbers in your answer (e.g., "3, 1, 2" or "1, 3"), never the names. \
+This is the required Science Bowl answer format for these questions."""
 
 
 def _clean_answer(r):

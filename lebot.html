@@ -227,9 +227,30 @@ tr:hover td { background: rgba(255,255,255,.03); }
 function normStr(s) {
   return (s || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
 }
-function checkCorrect(guess, gold) {
+function checkCorrect(guess, gold, stem) {
   if (!gold || !guess || guess.toUpperCase() === 'UNKNOWN') return null;
-  return normStr(guess) === normStr(gold);
+  const ng = normStr(guess), na = normStr(gold);
+  if (ng === na) return true;
+
+  // Accept field alternatives (pipe-separated in gold, or comma-separated accept strings)
+  // handled by the gold field itself if the server passes them joined — skip for now
+
+  // Numbered-list mapping: gold="3, 1, 2", bot="spin azimuthal magnetic"
+  // Parse "1) Foo; 2) Bar; 3) Baz" from the stem to build {1→foo, 2→bar, 3→baz}
+  if (stem && /^[\d,\s]+$/.test(gold.trim())) {
+    const items = {};
+    for (const m of stem.matchAll(/(\d+)\)\s*([^;:\n]{2,40})/g))
+      items[m[1]] = normStr(m[2]);
+    if (Object.keys(items).length) {
+      const goldNums = gold.split(/[\s,]+/).filter(Boolean);
+      const goldNames = goldNums.map(n => items[n]).filter(Boolean);
+      if (goldNames.length === goldNums.length) {
+        // bot answered with names → check match
+        return goldNames.every(n => ng.includes(n)) && ng.split(/\s+/).length <= goldNames.join(' ').split(/\s+/).length + 3;
+      }
+    }
+  }
+  return false;
 }
 function correctBadge(correct) {
   if (correct === true)  return '<span style="color:var(--green);font-weight:700;margin-left:5px">✓</span>';
@@ -365,7 +386,7 @@ function renderTimeline() {
     const isUnk = !s.guess || s.guess.toUpperCase() === 'UNKNOWN';
     const pColor = s.p_buzz >= .75 ? 'var(--yellow)' : s.p_buzz >= .5 ? 'var(--blue)' : 'var(--dim)';
     const isFirstBuzz = i === firstBuzzIdx;
-    const correct = checkCorrect(s.guess, gold);
+    const correct = checkCorrect(s.guess, gold, current.stem);
     const rowClass = isFirstBuzz ? 'first-buzz' : s.buzzes ? 'buzz-row' : '';
     return `<tr id="row-${i}" class="${rowClass}" onclick="jumpTo(${i})">
       <td class="mono" style="color:var(--dim)">w${s.widx}</td>
@@ -443,7 +464,7 @@ function renderStepDetail(s) {
       </div>
       ${s.reasoning ? `<div class="dr"><span class="dl">Thinking</span><span class="reasoning-text">${esc(s.reasoning)}</span></div>` : ''}
       ${current.gold ? (() => {
-        const c = checkCorrect(s.guess, current.gold);
+        const c = checkCorrect(s.guess, current.gold, current.stem);
         const col = c === true ? 'var(--green)' : c === false ? 'var(--red)' : 'var(--dim)';
         const mark = c === true ? ' ✓' : c === false ? ' ✗' : '';
         return `<div class="dr"><span class="dl">Gold</span><span class="mono" style="color:${col}">${esc(current.gold)}${mark}</span></div>`;
