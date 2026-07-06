@@ -122,7 +122,61 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
 class FullReq(BaseModel):
     stem: str
     category: str = "BIOLOGY"
+    options: list[str] | None = None  # 4 options W/X/Y/Z -> multiple-choice letter mode
     stride: int = 1  # per-word by default; parallel so wall-clock time is the same
+
+
+MC_LETTERS = ["W", "X", "Y", "Z"]
+
+
+def _analyze_mc(req: FullReq, words, total, indices):
+    """MC letter mode: predict W/X/Y/Z per prefix via self-consistency, blended with the
+    empirical letter prior. Shows the blind-prior baseline (no stem) so you can SEE
+    anticipation — the letter diverging from the pure option-prior is the real signal."""
+    opts = req.options
+    # blind prior once (no stem): the pure option/category prior to beat
+    blind_letters = answerer.blind(opts, req.category, n=5)
+    blind_letter, blind_conf = answerer.consensus_debiased(blind_letters, "", opts)
+
+    def one(widx):
+        prefix = " ".join(words[:widx])
+        letters = answerer.anticipate(prefix, opts, req.category, n=5)
+        letter, conf = answerer.consensus_debiased(letters, prefix, opts)
+        val = opts[MC_LETTERS.index(letter)] if letter in MC_LETTERS else None
+        return {"widx": widx, "letter": letter, "conf": conf, "option": val,
+                "votes": letters}
+
+    with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
+        raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
+
+    prev, run, seen, steps = None, 0, set(), []
+    for r in raw:
+        letter = r["letter"]
+        if letter is None:
+            run, prev = 0, None
+        elif letter == prev:
+            run += 1
+        else:
+            run, prev = 1, letter
+        if letter:
+            seen.add(letter)
+        diverges = letter is not None and letter != blind_letter
+        # prior-aware: buzzing on an answer that just echoes the blind prior needs MORE
+        # confidence; a divergent (anticipated) answer is trusted at the base threshold
+        eff_T = BUZZ_T if diverges else min(0.96, BUZZ_T + 0.15)
+        buzzes = letter is not None and r["conf"] >= eff_T and run >= 2
+        guess = f"{letter} — {r['option']}" if letter else "UNKNOWN"
+        steps.append({
+            "widx": r["widx"], "guess": guess, "letter": letter, "option": r["option"],
+            "mode": "mc", "p_buzz": round(r["conf"], 3), "stability_run": run,
+            "churn": len(seen), "frac": round(r["widx"] / total, 3), "buzzes": buzzes,
+            "diverges": diverges, "reasoning": "",
+            "haiku_vote": "".join(v[0] if v and v[0] in MC_LETTERS else "." for v in r["votes"]),
+            "agrees": None,
+        })
+    return {"steps": steps, "total_words": total, "mode": "mc",
+            "blind_prior": blind_letter, "blind_conf": round(blind_conf, 3),
+            "options": opts}
 
 
 @app.post("/analyze-full")
@@ -135,6 +189,9 @@ def analyze_full(req: FullReq):
     indices = list(range(req.stride, total + 1, req.stride))
     if not indices or indices[-1] < total:
         indices.append(total)
+
+    if req.options and len(req.options) == 4:
+        return _analyze_mc(req, words, total, indices)
 
     def one(widx):
         prefix = " ".join(words[:widx])

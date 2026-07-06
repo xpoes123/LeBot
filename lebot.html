@@ -173,8 +173,16 @@ tr:hover td { background: rgba(255,255,255,.03); }
           </select>
         </label>
         <input type="text" id="gold-input" placeholder="correct answer (optional)" style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:6px;font-size:14px">
+        <label class="ctrl-label" style="gap:5px"><input type="checkbox" id="mc-toggle" onchange="toggleMC(this.checked)"> Multiple choice</label>
         <button id="analyze-btn" onclick="startAnalysis()">Analyze</button>
         <span class="analyzing-msg" id="analyzing-msg">analyzing…</span>
+      </div>
+      <div class="input-row" id="mc-row" style="display:none">
+        <span style="color:var(--dim);font-size:12px;align-self:center">Options</span>
+        <input type="text" id="opt-W" placeholder="W" style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
+        <input type="text" id="opt-X" placeholder="X" style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
+        <input type="text" id="opt-Y" placeholder="Y" style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
+        <input type="text" id="opt-Z" placeholder="Z" style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
       </div>
     </div>
 
@@ -229,6 +237,13 @@ function normStr(s) {
 }
 function checkCorrect(guess, gold, stem) {
   if (!gold || !guess || guess.toUpperCase() === 'UNKNOWN') return null;
+  // MC guess "Z — Transducin": match the letter OR the value against the gold
+  const mc = guess.match(/^([WXYZ])\s*—\s*(.+)$/);
+  if (mc) {
+    if (normStr(gold) === mc[1].toLowerCase()) return true;      // gold is the letter
+    if (normStr(mc[2]) === normStr(gold)) return true;           // gold is the value
+    return normStr(mc[2]) === normStr(gold);
+  }
   const ng = normStr(guess), na = normStr(gold);
   if (ng === na) return true;
 
@@ -314,12 +329,23 @@ function loadSaved(id) {
 
 function persist() { localStorage.setItem('lebot-qs', JSON.stringify(saved)); }
 
+// ── MC toggle ──────────────────────────────────────────────────────────────
+function toggleMC(on) {
+  document.getElementById('mc-row').style.display = on ? 'flex' : 'none';
+}
+function mcOptions() {
+  if (!document.getElementById('mc-toggle').checked) return null;
+  const o = ['W','X','Y','Z'].map(L => document.getElementById('opt-'+L).value.trim());
+  return o.every(Boolean) ? o : null;
+}
+
 // ── Analysis ───────────────────────────────────────────────────────────────
 async function startAnalysis() {
   stopPlay();
   const stem = document.getElementById('stem-input').value.trim();
   const category = document.getElementById('cat-sel').value;
   const gold = document.getElementById('gold-input').value.trim();
+  const options = mcOptions();
   const stride = 1;
   if (!stem) return;
 
@@ -330,7 +356,7 @@ async function startAnalysis() {
     const res = await fetch('/analyze-full', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({stem, category, stride}),
+      body: JSON.stringify(options ? {stem, category, stride, options} : {stem, category, stride}),
     });
     const data = await res.json();
     if (!data.steps.length) return;
@@ -433,10 +459,33 @@ function showStep(i) {
   renderStepDetail(step);
 }
 
+function mcDetailBlock(s) {
+  const opts = current.options || [];
+  const rows = ['W','X','Y','Z'].map((L,i) => {
+    const picked = s.letter === L;
+    const isPrior = current.blind_prior === L;
+    return `<div style="display:flex;gap:6px;align-items:center;padding:2px 0">
+      <span style="width:14px;color:${picked?'var(--yellow)':'var(--dim)'};font-weight:${picked?'700':'400'}">${L}</span>
+      <span style="flex:1;color:${picked?'var(--text)':'var(--dim)'};font-size:12px">${esc(opts[i]||'')}</span>
+      ${picked?'<span style="color:var(--yellow)">◄</span>':''}
+      ${isPrior?'<span style="font-size:10px;color:var(--purple)" title="blind option-prior">prior</span>':''}
+    </div>`;
+  }).join('');
+  return `<div class="dr" style="flex-direction:column;gap:2px">
+    <span class="dl">Options</span>${rows}
+    <div style="margin-top:6px;font-size:11px;color:${s.diverges?'var(--green)':'var(--dim)'}">
+      blind prior: ${current.blind_prior||'—'} @ ${(current.blind_conf||0).toFixed(2)} ·
+      ${s.diverges?'✓ diverges — anticipating from the stem':'echoes the option-prior'}
+    </div>
+  </div>`;
+}
+
 function renderStepDetail(s) {
   const isUnk = !s.guess || s.guess.toUpperCase() === 'UNKNOWN';
   const pColor = s.p_buzz >= .7 ? 'var(--yellow)' : s.p_buzz >= .5 ? 'var(--blue)' : 'var(--dim)';
   const stabColor = s.stability_run >= 3 ? 'var(--green)' : s.stability_run >= 2 ? 'var(--yellow)' : 'var(--text)';
+  const isMC = current.mode === 'mc';
+  const pLabel = isMC ? 'confidence' : 'P(buzz)';
 
   document.getElementById('step-detail').innerHTML = `
     <div class="detail-card ${s.buzzes ? 'buzz-active' : ''}">
@@ -450,8 +499,9 @@ function renderStepDetail(s) {
           </div>
         </div>
       </div>
+      ${isMC ? mcDetailBlock(s) : ''}
       <div class="dr" style="flex-direction:column;gap:4px">
-        <div style="display:flex;justify-content:space-between"><span class="dl" style="width:auto">P(buzz)</span><span class="bar-val" style="color:${pColor}">${s.p_buzz.toFixed(2)}${s.p_buzz >= .7 ? ' ≥ T' : ''}</span></div>
+        <div style="display:flex;justify-content:space-between"><span class="dl" style="width:auto">${pLabel}</span><span class="bar-val" style="color:${pColor}">${s.p_buzz.toFixed(2)}${s.p_buzz >= .7 ? ' ≥ T' : ''}</span></div>
         <div class="bar-wrap"><div class="bar-fill" style="width:${s.p_buzz*100}%;background:${pColor}"></div><div class="bar-t"></div></div>
       </div>
       <div class="dr" style="flex-direction:column;gap:4px">
@@ -548,6 +598,13 @@ function loadPickedQuestion(id) {
   document.getElementById('stem-input').value = q.stem;
   document.getElementById('cat-sel').value = q.category;
   document.getElementById('gold-input').value = q.answer;
+  // auto-fill options for MC questions, clear otherwise
+  const isMC = q.format === 'multiple_choice' && q.options;
+  document.getElementById('mc-toggle').checked = isMC;
+  toggleMC(isMC);
+  ['W','X','Y','Z'].forEach(L => {
+    document.getElementById('opt-'+L).value = isMC ? (q.options[L.toLowerCase()] || '') : '';
+  });
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
