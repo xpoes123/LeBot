@@ -175,6 +175,13 @@ def _clean_answer(r):
     r = r.split("\n")[0]
     r = re.split(r"\s+(?:\(|—|–| - |, which| because| since| is | are | refers)", r)[0]
     r = r.strip().strip(".").strip()
+    # reasoning leaks: a trailing colon leads into an explanation ("For n = 3:"); a
+    # sentence opener followed by more words is a truncated explanation, not a term.
+    if r.endswith(":"):
+        return "UNKNOWN"
+    if re.match(r"(?i)(for|in the|since|because|if|when|as the|according|assuming|"
+                r"we|let|first|note that|given)\b[\s,]+\S+", r):
+        return "UNKNOWN"
     # a real short answer is brief; a long string means it explained -> not a clean commit
     return "UNKNOWN" if len(r.split()) > 7 or not r else r
 
