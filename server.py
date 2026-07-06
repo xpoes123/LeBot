@@ -97,6 +97,69 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
                 p_buzz=round(p, 3), buzzes=p >= BUZZ_T, haiku_vote=haiku_guess, agrees=agrees)
 
 
+class FullReq(BaseModel):
+    stem: str
+    category: str = "BIOLOGY"
+    stride: int = 3
+
+
+@app.post("/analyze-full")
+def analyze_full(req: FullReq):
+    """Process a complete stem in parallel. Returns the full trajectory as JSON."""
+    words = req.stem.split()
+    if not words:
+        return {"steps": [], "total_words": 0}
+    total = len(words)
+    indices = list(range(req.stride, total + 1, req.stride))
+    if not indices or indices[-1] < total:
+        indices.append(total)
+
+    def one(widx):
+        prefix = " ".join(words[:widx])
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fh = ex.submit(answerer.anticipate_best, prefix, req.category, 3)
+            fv = ex.submit(answerer.anticipate_sa_verbose, prefix, req.category)
+            haiku_guess, mode = fh.result()
+            reasoning, sonnet_guess = fv.result()
+        if mode == "calc":
+            guess = haiku_guess
+        elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
+            guess = sonnet_guess
+        else:
+            guess = haiku_guess
+        agrees = _norm(haiku_guess) == _norm(guess) if guess and guess.upper() != "UNKNOWN" else None
+        return {"widx": widx, "guess": guess, "mode": mode, "haiku_vote": haiku_guess,
+                "agrees": agrees, "reasoning": reasoning if mode == "recall" else "Computed via Python sandbox."}
+
+    with ThreadPoolExecutor(max_workers=min(len(indices), 8)) as ex:
+        raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
+
+    # Stability/churn/P computed post-hoc over the ordered sequence
+    prev_n, run, seen, steps = None, 0, set(), []
+    for r in raw:
+        guess = r["guess"]
+        is_unk = not guess or guess.upper() == "UNKNOWN"
+        ng = _norm(guess)
+        if is_unk:
+            run, prev_n = 0, None
+        elif ng == prev_n:
+            run += 1
+        else:
+            run, prev_n = 1, ng
+        if not is_unk:
+            seen.add(ng)
+        churn = len(seen)
+        frac = r["widx"] / total
+        cat_vec = [1.0 if req.category == c else 0.0 for c in CATS]
+        feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
+                           np.log1p(total), 1.0 if r["mode"] == "calc" else 0.0] + cat_vec])
+        p = float(_clf.predict_proba(feats)[0, 1])
+        steps.append({**r, "stability_run": run, "churn": churn,
+                      "frac": round(frac, 3), "p_buzz": round(p, 3), "buzzes": p >= BUZZ_T})
+
+    return {"steps": steps, "total_words": total}
+
+
 def _sse(obj):
     return f"data: {json.dumps(obj)}\n\n"
 
