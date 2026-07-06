@@ -26,7 +26,9 @@ _client = None  # lazy: so consensus()/LETTERS import without an API key (--dry)
 def _get_client():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
+        # max_retries rides out transient 429/5xx/529 overloads with the SDK's
+        # built-in exponential backoff (overnight batch runs hit 529 constantly).
+        _client = anthropic.Anthropic(max_retries=8)  # reads ANTHROPIC_API_KEY
     return _client
 
 SB_CONTEXT = """The U.S. National Science Bowl is a prestigious academic quiz \
@@ -149,7 +151,20 @@ CRITICAL — "must"/"always"/"necessarily" questions: for "identify all that MUS
 possible. A relationship that CAN hold does not mean it MUST (e.g. raising significance \
 raises power, but power can also rise via sample size, so significance need not increase). \
 If none of the items are guaranteed, the answer is "0" (none) — this is a valid and \
-common answer; do not force-pick an item just because the format lists several."""
+common answer; do not force-pick an item just because the format lists several.
+
+CRITICAL — multi-select ("identify all") questions: evaluate EACH numbered item \
+INDEPENDENTLY as true/false, then report the full set that qualifies. The most common \
+answer is a PAIR (two items), not one — do NOT stop at the first item that fits and \
+answer it alone. Give every qualifying index (e.g. "1, 3"); "0"/none and "1, 2, 3"/all \
+are both valid.
+
+ANSWER FORM (Science Bowl scoring): give the NAME of a concept, not a description \
+("Newton's second law", not "F=ma"; canonical symbols like "c" are fine). For a person, \
+LAST NAME ONLY ("Einstein"). OMIT units unless the question demands them. Numbers in \
+exact simplest form — no scientific notation, no repeating decimals (use fractions). \
+A chemical formula is only acceptable when the compound has no isomers (use the name \
+otherwise). Keep it to the bare answer term — never a sentence."""
 
 
 def _clean_answer(r):
