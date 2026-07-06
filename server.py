@@ -93,8 +93,13 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
                        np.log1p(total), is_calc] + cat_vec])
     p = float(_clf.predict_proba(feats)[0, 1])
     agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and haiku_guess else None
+    # Hard gate: if Haiku has no guess at all, there isn't enough info to buzz.
+    # Sonnet can still return a terse answer while its own reasoning says "I'll wait" —
+    # Haiku UNKNOWN is the reliable signal that the stem is incomplete.
+    haiku_no_guess = not haiku_guess or haiku_guess.upper() == "UNKNOWN"
     return dict(mode=mode, stability_run=run, churn=churn, frac=round(frac, 3),
-                p_buzz=round(p, 3), buzzes=p >= BUZZ_T, haiku_vote=haiku_guess, agrees=agrees)
+                p_buzz=round(p, 3), buzzes=p >= BUZZ_T and not haiku_no_guess,
+                haiku_vote=haiku_guess, agrees=agrees)
 
 
 class FullReq(BaseModel):
