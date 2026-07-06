@@ -34,7 +34,7 @@ def featurize(rec):
     seen = set()
     for p in rec["preds"]:
         widx, pred, correct = p[0], p[1], p[2]
-        is_calc = 1.0 if (len(p) > 3 and p[3] == "calc") else 0.0
+        is_calc = 1.0 if (len(p) > 3 and p[3] in ("calc", "seq")) else 0.0
         np_ = _norm(pred)
         is_unk = (pred.upper() == "UNKNOWN") or not np_
         if not is_unk and np_ == prev:

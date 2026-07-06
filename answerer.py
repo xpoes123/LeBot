@@ -17,6 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import anthropic
 
+import sequences
+
 LETTERS = ["W", "X", "Y", "Z"]
 MODEL = os.environ.get("LEBOT_MODEL", "claude-sonnet-4-6")       # System 2: thinking
 FAST = os.environ.get("LEBOT_FAST", "claude-haiku-4-5-20251001")  # System 1: subconscious
@@ -355,6 +357,9 @@ def anticipate_best(prefix, category, n=3):
     """Router: numbers present -> COMPUTE (calculator, exact); else recall via
     majority-voted gut answers. -> (answer, mode='calc'|'recall'). The calculator
     returns None until enough numbers are present, so it waits for the operative ones."""
+    seq = sequences.solve_ordering(prefix)  # deterministic canonical-sequence ordering
+    if seq is not None:
+        return seq, "seq"
     if not _is_list_q(prefix) and any(ch.isdigit() for ch in prefix):
         v = solve(prefix, category)
         if v is not None:

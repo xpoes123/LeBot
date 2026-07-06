@@ -67,7 +67,7 @@ def analyze(req: AnalyzeReq):
         haiku_guess, mode = f_haiku.result()
         reasoning, sonnet_guess = f_verbose.result()
 
-    if mode == "calc":
+    if mode in ("calc", "seq"):
         guess = haiku_guess
     elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
         guess = sonnet_guess
@@ -75,8 +75,16 @@ def analyze(req: AnalyzeReq):
         guess = haiku_guess
 
     buzz = _buzz_features(req, guess, mode, haiku_guess)
-    reasoning = reasoning if mode == "recall" else "Computed via Python sandbox."
+    reasoning = _reason_text(mode, reasoning)
     return {"guess": guess, "reasoning": reasoning, **buzz}
+
+
+def _reason_text(mode, reasoning):
+    if mode == "recall":
+        return reasoning
+    if mode == "seq":
+        return "Solved deterministically from a known canonical ordering (no LLM)."
+    return "Computed via Python sandbox."
 
 
 def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
@@ -85,7 +93,7 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
     total = max(req.total_words, words_heard)
     frac = words_heard / total
     is_unk = not guess or guess.upper() == "UNKNOWN"
-    is_calc = 1.0 if mode == "calc" else 0.0
+    is_calc = 1.0 if mode in ("calc", "seq") else 0.0
     all_guesses = [h.guess for h in req.history] + [guess]
     run = 0
     if not is_unk:
@@ -135,7 +143,7 @@ def analyze_full(req: FullReq):
             fv = ex.submit(answerer.anticipate_sa_verbose, prefix, req.category)
             haiku_guess, mode = fh.result()
             reasoning, sonnet_guess = fv.result()
-        if mode == "calc":
+        if mode in ("calc", "seq"):
             guess = haiku_guess
         elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
             guess = sonnet_guess
@@ -143,7 +151,7 @@ def analyze_full(req: FullReq):
             guess = haiku_guess
         agrees = _norm(haiku_guess) == _norm(guess) if guess and guess.upper() != "UNKNOWN" else None
         return {"widx": widx, "guess": guess, "mode": mode, "haiku_vote": haiku_guess,
-                "agrees": agrees, "reasoning": reasoning if mode == "recall" else "Computed via Python sandbox."}
+                "agrees": agrees, "reasoning": _reason_text(mode, reasoning)}
 
     with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
         raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
@@ -166,7 +174,7 @@ def analyze_full(req: FullReq):
         frac = r["widx"] / total
         cat_vec = [1.0 if req.category == c else 0.0 for c in CATS]
         feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
-                           np.log1p(total), 1.0 if r["mode"] == "calc" else 0.0] + cat_vec])
+                           np.log1p(total), 1.0 if r["mode"] in ("calc", "seq") else 0.0] + cat_vec])
         p = float(_clf.predict_proba(feats)[0, 1])
         steps.append({**r, "stability_run": run, "churn": churn,
                       "frac": round(frac, 3), "p_buzz": round(p, 3), "buzzes": p >= BUZZ_T})
@@ -194,7 +202,7 @@ def analyze_stream(req: AnalyzeReq):
                     # Haiku is usually done by now — brief wait at most
                     haiku_guess, mode = f_haiku.result()
                     # Calc answer is exact: override Sonnet for those
-                    final_guess = haiku_guess if mode == "calc" else (sonnet_guess or haiku_guess)
+                    final_guess = haiku_guess if mode in ("calc", "seq") else (sonnet_guess or haiku_guess)
                     if final_guess != sonnet_guess:
                         yield _sse({"type": "guess", "guess": final_guess})
 
