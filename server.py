@@ -50,12 +50,25 @@ def index():
 
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
-    # run main guess + verbose reasoning in parallel (no added latency)
+    # Run both in parallel — Sonnet verbose is already the latency bottleneck,
+    # so using its answer costs nothing. Haiku votes give stability features + agreement.
     with ThreadPoolExecutor(max_workers=2) as ex:
-        f_guess = ex.submit(answerer.anticipate_best, req.prefix, req.category, 3)
+        f_haiku = ex.submit(answerer.anticipate_best, req.prefix, req.category, 3)
         f_verbose = ex.submit(answerer.anticipate_sa_verbose, req.prefix, req.category)
-        guess, mode = f_guess.result()
-        reasoning, _ = f_verbose.result()
+        haiku_guess, mode = f_haiku.result()
+        reasoning, sonnet_guess = f_verbose.result()
+
+    # Sonnet is primary for recall (better on subtle/multi-part questions).
+    # Calc answer is exact — always keep it.
+    if mode == "calc":
+        guess = haiku_guess
+        agrees = True
+    elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
+        guess = sonnet_guess
+        agrees = _norm(haiku_guess) == _norm(sonnet_guess)
+    else:
+        guess = haiku_guess
+        agrees = None  # Sonnet unsure, fall back
 
     words_heard = len(req.prefix.split())
     total = max(req.total_words, words_heard)
@@ -94,4 +107,6 @@ def analyze(req: AnalyzeReq):
         "p_buzz": round(p, 3),
         "buzzes": p >= BUZZ_T,
         "reasoning": reasoning if mode == "recall" else "Computed via Python sandbox.",
+        "haiku_vote": haiku_guess,
+        "agrees": agrees,
     }

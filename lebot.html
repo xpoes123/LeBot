@@ -160,6 +160,7 @@ tr.buzz-row td { background: rgba(224,175,104,.06); }
       <span class="sl">Guess</span>
       <span id="guess-val" class="guess-val"></span>
       <span id="mode-badge" class="mode-badge"></span>
+      <span id="disagree-badge" style="display:none;font-size:11px;padding:2px 7px;border-radius:4px;background:rgba(247,118,142,.15);color:var(--red);margin-left:4px" title=""></span>
     </div>
     <div class="sr">
       <span class="sl">Stability</span>
@@ -237,6 +238,15 @@ function updateState(d) {
 
   const mb = document.getElementById('mode-badge');
   mb.textContent = d.mode; mb.className = 'mode-badge' + (d.mode === 'calc' ? ' calc' : '');
+
+  const db = document.getElementById('disagree-badge');
+  if (d.agrees === false) {
+    db.textContent = `⚠ Haiku: ${d.haiku_vote}`;
+    db.title = 'Sonnet and Haiku disagree — treat with caution';
+    db.style.display = '';
+  } else {
+    db.style.display = 'none';
+  }
 
   // stability bar (max display = 6)
   const stabPct = Math.min(100, d.stability_run / 6 * 100);
