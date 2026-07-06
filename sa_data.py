@@ -46,7 +46,7 @@ def process(q):
     words = q["question_text"].split()
     idx = sorted(set(list(range(0, len(words), STRIDE)) + [len(words) - 1]))
     prefixes = [" ".join(words[: j + 1]) for j in idx]
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    with ThreadPoolExecutor(max_workers=3) as ex:
         results = list(ex.map(
             lambda p: answerer.anticipate_best(p, q["category"]), prefixes))
     judged = {}  # dedup judging within this question
@@ -71,7 +71,11 @@ if __name__ == "__main__":
     done = [0]
 
     def work(q):
-        qid, rec = process(q)
+        try:
+            qid, rec = process(q)
+        except Exception as e:  # 529/overload etc. — skip, rerun fills the gap (idempotent)
+            print(f"  SKIP {_id(q)}: {type(e).__name__}")
+            return
         with lock:
             out[qid] = rec
             done[0] += 1
@@ -79,6 +83,6 @@ if __name__ == "__main__":
             if done[0] % 10 == 0:
                 print(f"  {done[0]}/{len(qs)}")
 
-    with ThreadPoolExecutor(max_workers=4) as ex:  # 4 questions x 6 prefixes concurrent
+    with ThreadPoolExecutor(max_workers=2) as ex:  # gentler: 2 questions x 3 prefixes
         list(ex.map(work, qs))
     print(f"wrote {OUT} ({len(out)} questions)")

@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupShuffleSplit
 
-LABELS = os.path.join(os.path.dirname(__file__), "sa_labels.json")
+LABELS = os.environ.get("SA_LABELS", os.path.join(os.path.dirname(__file__), "sa_labels.json"))
 CATS = ["BIOLOGY", "CHEMISTRY", "PHYSICS", "EARTH_SPACE", "MATH", "ENERGY", "OTHER"]
 GAIN, NEG = 4, -4  # short-answer toss-up: +4 correct, neg penalty for wrong interrupt
 
