@@ -269,7 +269,10 @@ def anticipate_sa_verbose(prefix, category):
         after = raw[raw.upper().index("ANSWER:") + 7:]
         parts = after.split("\n", 1)
         reasoning = parts[1].strip() if len(parts) > 1 else ""
-        return reasoning, _clean_answer(parts[0])
+        ans = _clean_answer(parts[0])
+        if _list_prior_guess(ans, prefix):  # blind index-guess before items shown
+            return reasoning, "UNKNOWN"
+        return reasoning, ans
     return raw.strip(), "UNKNOWN"  # no clean ANSWER line -> don't leak reasoning as answer
 
 
@@ -286,6 +289,32 @@ def _vote(cands):
     return rep[counts.most_common(1)[0][0]] if counts else "UNKNOWN"
 
 
+_NUMWORD = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+
+
+def _list_prior_guess(ans, prefix):
+    """True if `ans` is a numbered-list answer the model CAN'T actually know yet:
+    a bare index-list (e.g. '1, 2, 3', '2, 3') or 'none'/0 whose referenced items
+    aren't revealed in the stem so far. This is the blind format-prior — buzzing
+    '1, 2, 3' just because the question says "identify all of the following", before
+    seeing what 1/2/3 even are. Gated on the list cue ("following") so real numeric
+    recall answers ("22 digits") are never touched."""
+    a = (ans or "").strip().lower()
+    if not re.fullmatch(r"\d+(\s*,\s*\d+)*", a):
+        return False
+    low = prefix.lower()
+    if "following" not in low:                       # not a numbered-list question
+        return False
+    markers = set(re.findall(r"(\d+)\)", prefix))    # '1)', '2)' items revealed so far
+    nums = [n for n in re.findall(r"\d+", a) if n != "0"]
+    if not nums:                                     # '0' = none-of-them: need the WHOLE list
+        m = re.search(r"following\s+(\w+)", low)
+        g = m.group(1) if m else ""
+        want = _NUMWORD.get(g) or (int(g) if g.isdigit() else None)
+        return want is None or len(markers) < want
+    return any(n not in markers for n in nums)       # references an item not yet shown
+
+
 def anticipate_best(prefix, category, n=3):
     """Router: numbers present -> COMPUTE (calculator, exact); else recall via
     majority-voted gut answers. -> (answer, mode='calc'|'recall'). The calculator
@@ -294,7 +323,10 @@ def anticipate_best(prefix, category, n=3):
         v = solve(prefix, category)
         if v is not None:
             return v, "calc"
-    return _vote(anticipate_sa(prefix, category, n=n)), "recall"
+    ans = _vote(anticipate_sa(prefix, category, n=n))
+    if _list_prior_guess(ans, prefix):
+        ans = "UNKNOWN"
+    return ans, "recall"
 
 
 def stream_answer(prefix, category):
