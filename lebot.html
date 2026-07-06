@@ -407,19 +407,26 @@ function renderTimeline() {
   const firstBuzzIdx = current.steps.findIndex(s => s.buzzes);
   let prevWidx = 0;
   body.innerHTML = current.steps.map((s, i) => {
-    const snippet = words.slice(prevWidx, s.widx).join(' ');
-    prevWidx = s.widx;
+    const isOpt = s.phase === 'option';
+    const snippet = isOpt ? `▸ choice ${s.letter}: ${s.option}` : words.slice(prevWidx, s.widx).join(' ');
+    if (!isOpt) prevWidx = s.widx;
+    const widxLabel = isOpt ? s.letter : ('w' + s.widx);
     const isUnk = !s.guess || s.guess.toUpperCase() === 'UNKNOWN';
     const pColor = s.p_buzz >= .75 ? 'var(--yellow)' : s.p_buzz >= .5 ? 'var(--blue)' : 'var(--dim)';
     const isFirstBuzz = i === firstBuzzIdx;
-    const correct = checkCorrect(s.guess, gold, current.stem);
-    const rowClass = isFirstBuzz ? 'first-buzz' : s.buzzes ? 'buzz-row' : '';
+    const correct = isOpt ? (s.matches ? checkCorrect(s.guess, gold, current.stem) : null)
+                          : checkCorrect(s.guess, gold, current.stem);
+    const rowClass = isFirstBuzz ? 'first-buzz' : s.buzzes ? 'buzz-row' : (isOpt ? '' : '');
+    const cellTxt = isOpt ? (s.matches ? esc(s.guess) : `<span style="color:var(--dim)">${esc(s.option)}</span>`)
+                          : (isUnk ? '<span style="color:var(--dim)">—</span>' : esc(s.guess));
     return `<tr id="row-${i}" class="${rowClass}" onclick="jumpTo(${i})">
-      <td class="mono" style="color:var(--dim)">w${s.widx}</td>
+      <td class="mono" style="color:${isOpt ? 'var(--cyan)' : 'var(--dim)'}">${widxLabel}</td>
       <td class="snippet-cell">${esc(snippet)}</td>
-      <td class="mono">${isUnk ? '<span style="color:var(--dim)">—</span>' : esc(s.guess)}
+      <td class="mono">${cellTxt}
         ${isFirstBuzz ? '<span class="tag tag-buzz" style="margin-left:4px">BUZZ</span>' : ''}
+        ${isOpt && s.matches ? '<span class="tag tag-calc" style="margin-left:4px">match</span>' : ''}
         ${s.mode === 'calc' ? '<span class="tag tag-calc" style="margin-left:4px">calc</span>' : ''}
+        ${s.mode === 'seq' ? '<span class="tag tag-calc" style="margin-left:4px">seq</span>' : ''}
         ${s.agrees === false ? '<span class="tag tag-dis" style="margin-left:4px">⚠</span>' : ''}
       </td>
       <td>
@@ -435,14 +442,28 @@ function showStep(i) {
   stepIdx = i;
   const step = current.steps[i];
   const words = current.stem.split(' ');
-  const total = current.total_words;
-  const prevWidx = i > 0 ? current.steps[i-1].widx : 0;
+  const prevWidx = (i > 0 && current.steps[i-1].phase !== 'option') ? current.steps[i-1].widx : (step.phase === 'option' ? words.length : 0);
+  const qd = document.getElementById('q-display');
 
-  // Question display with word coloring
-  document.getElementById('q-display').innerHTML = words.map((w, wi) => {
-    const cls = wi >= step.widx ? 'w-upcoming' : wi >= prevWidx ? 'w-current' : 'w-past';
-    return `<span class="${cls}">${esc(w)} </span>`;
-  }).join('');
+  if (step.phase === 'option') {
+    // stem fully read; reveal the choices W..this one, in order
+    const upto = ['W','X','Y','Z'].indexOf(step.letter);
+    const stemHtml = words.map(w => `<span class="w-past">${esc(w)} </span>`).join('');
+    const optsHtml = (current.options || []).map((o, k) => {
+      if (k > upto) return '';
+      const L = ['W','X','Y','Z'][k];
+      const cur = k === upto;
+      const col = cur ? (step.matches ? 'var(--green)' : 'var(--yellow)') : 'var(--dim)';
+      return `<div style="color:${col};margin-top:${k===0?'10px':'2px'};font-weight:${cur?'600':'400'}">`
+           + `${L}) ${esc(o)}${cur && step.matches ? '  ◄ matches your answer' : ''}</div>`;
+    }).join('');
+    qd.innerHTML = stemHtml + optsHtml;
+  } else {
+    qd.innerHTML = words.map((w, wi) => {
+      const cls = wi >= step.widx ? 'w-upcoming' : wi >= prevWidx ? 'w-current' : 'w-past';
+      return `<span class="${cls}">${esc(w)} </span>`;
+    }).join('');
+  }
 
   // Step indicator
   document.getElementById('step-ind').textContent = `Step ${i+1} / ${current.steps.length}`;
@@ -459,33 +480,37 @@ function showStep(i) {
   renderStepDetail(step);
 }
 
-function mcDetailBlock(s) {
-  const opts = current.options || [];
-  const rows = ['W','X','Y','Z'].map((L,i) => {
-    const picked = s.letter === L;
-    const isPrior = current.blind_prior === L;
-    return `<div style="display:flex;gap:6px;align-items:center;padding:2px 0">
-      <span style="width:14px;color:${picked?'var(--yellow)':'var(--dim)'};font-weight:${picked?'700':'400'}">${L}</span>
-      <span style="flex:1;color:${picked?'var(--text)':'var(--dim)'};font-size:12px">${esc(opts[i]||'')}</span>
-      ${picked?'<span style="color:var(--yellow)">◄</span>':''}
-      ${isPrior?'<span style="font-size:10px;color:var(--purple)" title="blind option-prior">prior</span>':''}
-    </div>`;
-  }).join('');
-  return `<div class="dr" style="flex-direction:column;gap:2px">
-    <span class="dl">Options</span>${rows}
-    <div style="margin-top:6px;font-size:11px;color:${s.diverges?'var(--green)':'var(--dim)'}">
-      blind prior: ${current.blind_prior||'—'} @ ${(current.blind_conf||0).toFixed(2)} ·
-      ${s.diverges?'✓ diverges — anticipating from the stem':'echoes the option-prior'}
-    </div>
-  </div>`;
+function goldRow(guess) {
+  if (!current.gold) return '';
+  const c = checkCorrect(guess, current.gold, current.stem);
+  const col = c === true ? 'var(--green)' : c === false ? 'var(--red)' : 'var(--dim)';
+  const mark = c === true ? ' ✓' : c === false ? ' ✗' : '';
+  return `<div class="dr"><span class="dl">Gold</span><span class="mono" style="color:${col}">${esc(current.gold)}${mark}</span></div>`;
 }
 
 function renderStepDetail(s) {
+  // OPTION-REVEAL phase (MC): the choices are read after the stem, one at a time
+  if (s.phase === 'option') {
+    const col = s.matches ? 'var(--green)' : 'var(--dim)';
+    document.getElementById('step-detail').innerHTML = `
+      <div class="detail-card ${s.buzzes ? 'buzz-active' : ''}">
+        <div class="dr"><span class="dl">Reading</span>
+          <div><div class="guess-big" style="color:${col}">${s.letter}) ${esc(s.option)}</div>
+          <div style="margin-top:4px"><span class="mode-badge">choice read aloud</span></div></div>
+        </div>
+        <div class="dr"><span class="dl">Bot's answer</span>
+          <span class="mono" style="color:var(--text)">${esc(current.answer_value || '—')}</span></div>
+        <div class="dr"><span class="dl">Match</span>
+          <span style="color:${col};font-size:12px">${s.matches ? '✓ this choice matches the anticipated answer' : '✗ not a match'}</span></div>
+        ${goldRow(s.guess)}
+        ${s.buzzes ? '<div class="buzz-pill">⚡ BUZZ — matching choice</div>' : ''}
+      </div>`;
+    return;
+  }
+  // STEM phase: value anticipation (blind to the choices)
   const isUnk = !s.guess || s.guess.toUpperCase() === 'UNKNOWN';
   const pColor = s.p_buzz >= .7 ? 'var(--yellow)' : s.p_buzz >= .5 ? 'var(--blue)' : 'var(--dim)';
   const stabColor = s.stability_run >= 3 ? 'var(--green)' : s.stability_run >= 2 ? 'var(--yellow)' : 'var(--text)';
-  const isMC = current.mode === 'mc';
-  const pLabel = isMC ? 'confidence' : 'P(buzz)';
 
   document.getElementById('step-detail').innerHTML = `
     <div class="detail-card ${s.buzzes ? 'buzz-active' : ''}">
@@ -499,9 +524,8 @@ function renderStepDetail(s) {
           </div>
         </div>
       </div>
-      ${isMC ? mcDetailBlock(s) : ''}
       <div class="dr" style="flex-direction:column;gap:4px">
-        <div style="display:flex;justify-content:space-between"><span class="dl" style="width:auto">${pLabel}</span><span class="bar-val" style="color:${pColor}">${s.p_buzz.toFixed(2)}${s.p_buzz >= .7 ? ' ≥ T' : ''}</span></div>
+        <div style="display:flex;justify-content:space-between"><span class="dl" style="width:auto">P(buzz)</span><span class="bar-val" style="color:${pColor}">${s.p_buzz.toFixed(2)}${s.p_buzz >= .7 ? ' ≥ T' : ''}</span></div>
         <div class="bar-wrap"><div class="bar-fill" style="width:${s.p_buzz*100}%;background:${pColor}"></div><div class="bar-t"></div></div>
       </div>
       <div class="dr" style="flex-direction:column;gap:4px">
@@ -513,12 +537,7 @@ function renderStepDetail(s) {
         <span style="color:var(--dim);font-size:12px">${s.stability_run} run · ${s.churn} unique</span>
       </div>
       ${s.reasoning ? `<div class="dr"><span class="dl">Thinking</span><span class="reasoning-text">${esc(s.reasoning)}</span></div>` : ''}
-      ${current.gold ? (() => {
-        const c = checkCorrect(s.guess, current.gold, current.stem);
-        const col = c === true ? 'var(--green)' : c === false ? 'var(--red)' : 'var(--dim)';
-        const mark = c === true ? ' ✓' : c === false ? ' ✗' : '';
-        return `<div class="dr"><span class="dl">Gold</span><span class="mono" style="color:${col}">${esc(current.gold)}${mark}</span></div>`;
-      })() : ''}
+      ${goldRow(s.guess)}
       ${s.buzzes ? '<div class="buzz-pill">⚡ BUZZ</div>' : ''}
     </div>`;
 }

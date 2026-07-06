@@ -129,84 +129,15 @@ class FullReq(BaseModel):
 MC_LETTERS = ["W", "X", "Y", "Z"]
 
 
-def _analyze_mc(req: FullReq, words, total, indices):
-    """MC letter mode: predict W/X/Y/Z per prefix via self-consistency, blended with the
-    empirical letter prior. Shows the blind-prior baseline (no stem) so you can SEE
-    anticipation — the letter diverging from the pure option-prior is the real signal."""
-    opts = req.options
-    # blind prior once (no stem): the pure option/category prior to beat. Same model
-    # (Sonnet) as the stem-guess so the comparison isolates what the STEM adds.
-    blind_letters = answerer.blind(opts, req.category, n=5, model=answerer.MODEL)
-    blind_letter, blind_conf = answerer.consensus_debiased(blind_letters, "", opts)
-
-    def one(widx):
-        prefix = " ".join(words[:widx])
-        letters = answerer.guess(prefix, opts, req.category, n=5)
-        letter, conf = answerer.consensus_debiased(letters, prefix, opts)
-        val = opts[MC_LETTERS.index(letter)] if letter in MC_LETTERS else None
-        return {"widx": widx, "letter": letter, "conf": conf, "option": val,
-                "votes": letters}
-
-    with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
-        raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
-
-    prev, run, seen, steps = None, 0, set(), []
-    for r in raw:
-        letter = r["letter"]
-        if letter is None:
-            run, prev = 0, None
-        elif letter == prev:
-            run += 1
-        else:
-            run, prev = 1, letter
-        if letter:
-            seen.add(letter)
-        diverges = letter is not None and letter != blind_letter
-        frac = r["widx"] / total
-        # PRIOR-AWARE buzz. Self-consistency confidence is uncalibrated (Sonnet saturates
-        # at 1.0 even when it's just echoing the option-prior), so confidence alone can't
-        # gate. A DIVERGENT answer means the stem moved the model off its blind prior ->
-        # trust it and buzz early. An answer that merely ECHOES the blind prior is
-        # indistinguishable from a blind guess until late -> require most of the stem.
-        if letter is None:
-            buzzes = False
-        elif diverges:
-            buzzes = r["conf"] >= BUZZ_T and run >= 2
-        else:
-            buzzes = r["conf"] >= BUZZ_T and run >= 2 and frac >= 0.66
-        guess = f"{letter} — {r['option']}" if letter else "UNKNOWN"
-        steps.append({
-            "widx": r["widx"], "guess": guess, "letter": letter, "option": r["option"],
-            "mode": "mc", "p_buzz": round(r["conf"], 3), "stability_run": run,
-            "churn": len(seen), "frac": round(r["widx"] / total, 3), "buzzes": buzzes,
-            "diverges": diverges, "reasoning": "",
-            "haiku_vote": "".join(v[0] if v and v[0] in MC_LETTERS else "." for v in r["votes"]),
-            "agrees": None,
-        })
-    return {"steps": steps, "total_words": total, "mode": "mc",
-            "blind_prior": blind_letter, "blind_conf": round(blind_conf, 3),
-            "options": opts}
-
-
-@app.post("/analyze-full")
-def analyze_full(req: FullReq):
-    """Process a complete stem in parallel. Returns the full trajectory as JSON."""
-    words = req.stem.split()
-    if not words:
-        return {"steps": [], "total_words": 0}
-    total = len(words)
-    indices = list(range(req.stride, total + 1, req.stride))
-    if not indices or indices[-1] < total:
-        indices.append(total)
-
-    if req.options and len(req.options) == 4:
-        return _analyze_mc(req, words, total, indices)
-
+def _value_steps(category, words, total, indices):
+    """Anticipate the ANSWER VALUE over stem prefixes (blind to any options — the way a
+    player hears the stem before the choices). Returns the per-prefix trajectory with the
+    calibrated LR-buzzer P. Shared by short-answer and MC (the stem phase is identical)."""
     def one(widx):
         prefix = " ".join(words[:widx])
         with ThreadPoolExecutor(max_workers=2) as ex:
-            fh = ex.submit(answerer.anticipate_best, prefix, req.category, 3)
-            fv = ex.submit(answerer.anticipate_sa_verbose, prefix, req.category)
+            fh = ex.submit(answerer.anticipate_best, prefix, category, 3)
+            fv = ex.submit(answerer.anticipate_sa_verbose, prefix, category)
             haiku_guess, mode = fh.result()
             reasoning, sonnet_guess = fv.result()
         if mode in ("calc", "seq"):
@@ -222,7 +153,6 @@ def analyze_full(req: FullReq):
     with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
         raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
 
-    # Stability/churn/P computed post-hoc over the ordered sequence
     prev_n, run, seen, steps = None, 0, set(), []
     for r in raw:
         guess = r["guess"]
@@ -238,13 +168,73 @@ def analyze_full(req: FullReq):
             seen.add(ng)
         churn = len(seen)
         frac = r["widx"] / total
-        cat_vec = [1.0 if req.category == c else 0.0 for c in CATS]
+        cat_vec = [1.0 if category == c else 0.0 for c in CATS]
         feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
                            np.log1p(total), 1.0 if r["mode"] in ("calc", "seq") else 0.0] + cat_vec])
         p = float(_clf.predict_proba(feats)[0, 1])
-        steps.append({**r, "stability_run": run, "churn": churn,
+        steps.append({**r, "phase": "stem", "stability_run": run, "churn": churn,
                       "frac": round(frac, 3), "p_buzz": round(p, 3), "buzzes": p >= BUZZ_T})
+    return steps
 
+
+def _mc_epilogue(req: FullReq, stem_steps, total):
+    """After the stem, the moderator reads the four choices W→X→Y→Z in order. The bot has
+    already anticipated a VALUE from the stem; now it maps that value onto a letter and
+    buzzes the moment the matching choice is read. If it already committed (buzzed) during
+    the stem, that stem buzz stands and the options just confirm the letter."""
+    opts = req.options
+    committed = next((s for s in stem_steps if s["buzzes"] and s["guess"].upper() != "UNKNOWN"), None)
+    final = stem_steps[-1]["guess"] if stem_steps else "UNKNOWN"
+    value = committed["guess"] if committed else final
+    value = value if value and value.upper() != "UNKNOWN" else None
+
+    # map the anticipated value onto a choice (semantic; first match in reading order)
+    matches = [False, False, False, False]
+    matched = None
+    if value:
+        for k, text in enumerate(opts):
+            if answerer.judge(value, text):
+                matches[k], matched = True, MC_LETTERS[k]
+                break
+
+    option_steps = []
+    for k, (L, text) in enumerate(zip(MC_LETTERS, opts)):
+        is_match = matches[k]
+        # buzz at the matching choice only if it did NOT already commit during the stem
+        buzz = is_match and committed is None and value is not None
+        option_steps.append({
+            "widx": total + k + 1, "phase": "option", "letter": L, "option": text,
+            "guess": f"{L} — {text}" if is_match else (value or "UNKNOWN"),
+            "matches": is_match, "buzzes": buzz, "mode": "option",
+            "p_buzz": stem_steps[-1]["p_buzz"] if stem_steps else 0.0,
+            "stability_run": 0, "churn": 0, "frac": 1.0, "reasoning": "",
+            "haiku_vote": "", "agrees": None,
+        })
+
+    return {
+        "mode": "mc", "options": opts, "answer_value": value, "matched_letter": matched,
+        "committed_widx": committed["widx"] if committed else None,
+        "steps": stem_steps + option_steps, "total_words": total, "stem_words": total,
+    }
+
+
+@app.post("/analyze-full")
+def analyze_full(req: FullReq):
+    """Process a complete stem in parallel. Returns the full trajectory as JSON.
+
+    For MC, the stem is anticipated as a VALUE (blind to the choices, as in a real match),
+    then an option-reveal epilogue maps that value to a letter."""
+    words = req.stem.split()
+    if not words:
+        return {"steps": [], "total_words": 0}
+    total = len(words)
+    indices = list(range(req.stride, total + 1, req.stride))
+    if not indices or indices[-1] < total:
+        indices.append(total)
+
+    steps = _value_steps(req.category, words, total, indices)
+    if req.options and len(req.options) == 4:
+        return _mc_epilogue(req, steps, total)
     return {"steps": steps, "total_words": total}
 
 
