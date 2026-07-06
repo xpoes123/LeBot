@@ -292,6 +292,44 @@ def anticipate_best(prefix, category, n=3):
     return _vote(anticipate_sa(prefix, category, n=n)), "recall"
 
 
+def stream_answer(prefix, category):
+    """Stream the verbose call. Yields ('answer', str) as soon as the ANSWER: line
+    is complete (~0.4s), then ('reasoning', str) when the stream finishes (~1.5s).
+    This cuts effective latency from 1.5s to 0.4s — ~1 word instead of ~4."""
+    system = META_SA.format(category=category)
+    user = (
+        f"This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
+        "FIRST line, exactly: ANSWER: <a terse answer, or UNKNOWN>\n"
+        "SECOND line: one short sentence explaining your reasoning."
+    )
+    buf = ""
+    answer_sent = False
+    with _get_client().messages.stream(
+        model=MODEL,
+        max_tokens=120,
+        temperature=0.7,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": user}],
+    ) as stream:
+        for chunk in stream.text_stream:
+            buf += chunk
+            if not answer_sent and "ANSWER:" in buf.upper():
+                after = buf[buf.upper().index("ANSWER:") + 7:]
+                if "\n" in after:
+                    answer_sent = True
+                    yield "answer", _clean_answer(after.split("\n")[0])
+    # full buffer — extract reasoning from second line
+    if "ANSWER:" in buf.upper():
+        after = buf[buf.upper().index("ANSWER:") + 7:]
+        parts = after.split("\n", 1)
+        reasoning = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        reasoning = ""
+    if not answer_sent:
+        yield "answer", _clean_answer(buf)
+    yield "reasoning", reasoning
+
+
 def judge(pred, gold):
     """Semantic correctness for short answer (synonyms/equivalent forms count)."""
     if not pred or pred.upper() == "UNKNOWN":

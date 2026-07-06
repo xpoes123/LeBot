@@ -3,6 +3,7 @@ POST /analyze  {prefix, category, total_words, history:[{guess,mode}]}
             -> {guess, mode, stability_run, churn, frac, p_buzz, buzzes, reasoning}
 GET  /       -> lebot.html
 """
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from sklearn.linear_model import LogisticRegression
 
@@ -58,27 +59,26 @@ def analyze(req: AnalyzeReq):
         haiku_guess, mode = f_haiku.result()
         reasoning, sonnet_guess = f_verbose.result()
 
-    # Sonnet is primary for recall (better on subtle/multi-part questions).
-    # Calc answer is exact — always keep it.
     if mode == "calc":
         guess = haiku_guess
-        agrees = True
     elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
         guess = sonnet_guess
-        agrees = _norm(haiku_guess) == _norm(sonnet_guess)
     else:
         guess = haiku_guess
-        agrees = None  # Sonnet unsure, fall back
 
+    buzz = _buzz_features(req, guess, mode, haiku_guess)
+    reasoning = reasoning if mode == "recall" else "Computed via Python sandbox."
+    return {"guess": guess, "reasoning": reasoning, **buzz}
+
+
+def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
+    """Shared buzzer feature computation used by both endpoints."""
     words_heard = len(req.prefix.split())
     total = max(req.total_words, words_heard)
     frac = words_heard / total
-
     is_unk = not guess or guess.upper() == "UNKNOWN"
     is_calc = 1.0 if mode == "calc" else 0.0
-
     all_guesses = [h.guess for h in req.history] + [guess]
-
     run = 0
     if not is_unk:
         for g in reversed(all_guesses):
@@ -86,27 +86,52 @@ def analyze(req: AnalyzeReq):
                 run += 1
             else:
                 break
-
     seen = {_norm(g) for g in all_guesses if g and g.upper() != "UNKNOWN"}
     churn = len(seen)
-
     cat_vec = [1.0 if req.category == c else 0.0 for c in CATS]
-    feats = np.array([[
-        frac, 0.0 if is_unk else 1.0, float(run), float(churn),
-        np.log1p(total), is_calc,
-    ] + cat_vec])
-
+    feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
+                       np.log1p(total), is_calc] + cat_vec])
     p = float(_clf.predict_proba(feats)[0, 1])
+    agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and haiku_guess else None
+    return dict(mode=mode, stability_run=run, churn=churn, frac=round(frac, 3),
+                p_buzz=round(p, 3), buzzes=p >= BUZZ_T, haiku_vote=haiku_guess, agrees=agrees)
 
-    return {
-        "guess": guess,
-        "mode": mode,
-        "stability_run": run,
-        "churn": churn,
-        "frac": round(frac, 3),
-        "p_buzz": round(p, 3),
-        "buzzes": p >= BUZZ_T,
-        "reasoning": reasoning if mode == "recall" else "Computed via Python sandbox.",
-        "haiku_vote": haiku_guess,
-        "agrees": agrees,
-    }
+
+def _sse(obj):
+    return f"data: {json.dumps(obj)}\n\n"
+
+
+@app.post("/analyze-stream")
+def analyze_stream(req: AnalyzeReq):
+    """Streaming version: yields 'guess' at ~0.4s, 'buzz' shortly after, 'reasoning' last."""
+    def generate():
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            f_haiku = ex.submit(answerer.anticipate_best, req.prefix, req.category, 3)
+
+            sonnet_guess = None
+            for event, value in answerer.stream_answer(req.prefix, req.category):
+                if event == "answer":
+                    sonnet_guess = value
+                    yield _sse({"type": "guess", "guess": value})
+
+                    # Haiku is usually done by now — brief wait at most
+                    haiku_guess, mode = f_haiku.result()
+                    # Calc answer is exact: override Sonnet for those
+                    final_guess = haiku_guess if mode == "calc" else (sonnet_guess or haiku_guess)
+                    if final_guess != sonnet_guess:
+                        yield _sse({"type": "guess", "guess": final_guess})
+
+                    buzz = _buzz_features(req, final_guess, mode, haiku_guess)
+                    yield _sse({"type": "buzz", **buzz})
+
+                elif event == "reasoning":
+                    reasoning = value if (sonnet_guess or "").upper() != "UNKNOWN" else ""
+                    yield _sse({"type": "reasoning", "reasoning": reasoning})
+
+        yield _sse({"type": "done"})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

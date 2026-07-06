@@ -306,37 +306,86 @@ function updateHistory() {
   });
 }
 
+let _abortCtrl = null;
+
 async function addWords() {
   const input = document.getElementById('word-input');
   const newWords = input.value.trim().split(/\s+/).filter(Boolean);
   if (!newWords.length) return;
 
-  const prevLen = words.length;
+  // Cancel any in-flight stream (user added words before reasoning finished)
+  if (_abortCtrl) _abortCtrl.abort();
+  _abortCtrl = new AbortController();
+
   words = [...words, ...newWords];
   input.value = '';
   updateStem(newWords.length);
   setLoading(true);
 
+  // Hide stale reasoning while new call is in flight
+  document.getElementById('reasoning-row').style.display = 'none';
+
+  const step = {wordIdx: words.length};
+  const total = totalWords || words.length * 2;
+
   try {
-    const total = totalWords || words.length * 2;
-    const res = await fetch('/analyze', {
+    const res = await fetch('/analyze-stream', {
       method: 'POST',
+      signal: _abortCtrl.signal,
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        prefix: words.join(' '),
-        category,
-        total_words: total,
+        prefix: words.join(' '), category, total_words: total,
         history: history.map(h => ({guess: h.guess, mode: h.mode})),
       }),
     });
-    const d = await res.json();
-    if (d.buzzes && firstBuzz === null) firstBuzz = words.length;
-    history.push({wordIdx: words.length, ...d});
-    updateState(d);
-    updateHistory();
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const parts = buf.split('\n\n');
+      buf = parts.pop();                   // keep incomplete trailing chunk
+      for (const part of parts) {
+        if (!part.startsWith('data: ')) continue;
+        const d = JSON.parse(part.slice(6));
+
+        if (d.type === 'guess') {
+          // First fast update — just the guess, no confidence yet
+          step.guess = d.guess;
+          document.getElementById('state-card').style.display = '';
+          const gv = document.getElementById('guess-val');
+          const isUnk = !d.guess || d.guess.toUpperCase() === 'UNKNOWN';
+          gv.className = isUnk ? 'guess-unk' : 'guess-val';
+          gv.style.color = 'var(--text)';
+          gv.textContent = isUnk ? '—' : d.guess;
+          document.getElementById('disagree-badge').style.display = 'none';
+
+        } else if (d.type === 'buzz') {
+          // Full confidence info — enable input again
+          Object.assign(step, d);
+          updateState({guess: step.guess, ...d});
+          setLoading(false);
+          document.getElementById('word-input').focus();
+
+        } else if (d.type === 'reasoning') {
+          step.reasoning = d.reasoning;
+          const rrow = document.getElementById('reasoning-row');
+          const rval = document.getElementById('reasoning-val');
+          if (d.reasoning) { rval.textContent = d.reasoning; rrow.style.display = ''; }
+
+        } else if (d.type === 'done') {
+          if (step.buzzes && firstBuzz === null) firstBuzz = words.length;
+          history.push(step);
+          updateHistory();
+        }
+      }
+    }
   } catch(e) {
-    console.error(e);
-  } finally {
+    if (e.name !== 'AbortError') console.error(e);
     setLoading(false);
     document.getElementById('word-input').focus();
   }
