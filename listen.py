@@ -22,9 +22,29 @@ import httpx
 import numpy as np
 from faster_whisper import WhisperModel
 
+def _load_env():
+    for line in Path(__file__).with_name(".env").read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env()
 LEBOT_URL = os.environ.get("LEBOT_URL", "https://lebot.djiang.xyz")
 CATEGORY = (sys.argv[1].upper() if len(sys.argv) > 1 else "OTHER")
 RATE = 16000
+
+
+def post_discord(msg):
+    tok, ch = os.environ.get("DISCORD_TOKEN"), os.environ.get("DISCORD_CHANNEL_ID")
+    if not tok or not ch:
+        return
+    try:
+        httpx.post(f"https://discord.com/api/v10/channels/{ch}/messages",
+                   headers={"Authorization": f"Bot {tok}"},
+                   json={"content": msg[:1900]}, timeout=10)
+    except Exception as e:
+        print("discord post err:", e, flush=True)
 
 
 def _default_monitor():
@@ -46,12 +66,12 @@ def _load_whisper():
                 ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
             except OSError:
                 pass
-        m = WhisperModel("base.en", device="cuda", compute_type="float16")
+        m = WhisperModel("small.en", device="cuda", compute_type="float16")
         print("Whisper on GPU (RTX 4060)", flush=True)
         return m
     except Exception as e:
         print(f"GPU unavailable ({str(e)[:60]}); CPU", flush=True)
-        return WhisperModel("base.en", device="cpu", compute_type="int8")
+        return WhisperModel("small.en", device="cpu", compute_type="int8")
 
 
 _model = _load_whisper()
@@ -101,7 +121,7 @@ def main():
     client = httpx.Client(timeout=20)
     history, last_words, silent_cycles, buzzed = [], 0, 0, False
 
-    SPEECH, QUIET = 0.012, 0.010   # calibrate against the debug RMS readout
+    SPEECH, QUIET = 0.004, 0.0035   # your mic is quiet; low thresholds
     while True:
         time.sleep(1.2)
         raw = _grab()
@@ -112,8 +132,9 @@ def main():
         print(f"[dbg buf={len(audio)/RATE:4.1f}s rms={rms:.4f} tail={tail_rms:.4f}]", flush=True)
 
         # transcribe whenever the buffer holds real audio (don't drop on a pause)
-        if rms > 0.006:
-            text = _transcribe(audio)
+        if rms > SPEECH:
+            gain = min(10.0, 0.06 / max(rms, 0.004))   # boost quiet mic for clean STT
+            text = _transcribe((audio * gain).astype(np.float32))
             nwords = len(text.split())
             if text and nwords > last_words:
                 last_words = nwords
@@ -126,15 +147,17 @@ def main():
                     d = {}
                 history.append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
                 guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
-                print(f"[{nwords:2}w P={p:.2f}] …{text[-55:]}", flush=True)
+                print(f"[{nwords:2}w P={p:.2f} → {guess[:22]}] …{text[-45:]}", flush=True)
                 if d.get("buzzes") and not buzzed:
                     buzzed = True
                     print(f"\n  ⚡⚡ BUZZ — {guess}  (P={p}, {nwords} words)\n", flush=True)
+                    post_discord(f"⚡ **BUZZ** — **{guess}**  (P={p}, {nwords} words heard)\n> {text}")
 
-        # sustained quiet after a question -> reset for the next one
+        # sustained quiet after a question -> reset for the next one (patient: ~6s so
+        # natural reading pauses don't chop a question in half)
         if tail_rms < QUIET:
             silent_cycles += 1
-            if silent_cycles >= 3 and last_words > 0:
+            if silent_cycles >= 5 and last_words > 0:
                 print("  — silence, resetting for next question —\n", flush=True)
                 _reset()
                 history, last_words, silent_cycles, buzzed = [], 0, 0, False

@@ -1,25 +1,27 @@
-"""LeBot voice bot — sits in a Discord voice call, transcribes the reader with Whisper,
-and streams the growing question text to the VPS anticipation pipeline, buzzing the moment
-the buzzer commits.
+"""LeBot control bot — one local process you drive from Discord.
 
-Commands (prefix !):
-  !join            join your current voice channel
-  !go [category]   start a NEW question: reset, listen, transcribe, anticipate
-  !stop            end the current question
-  !leave           disconnect
+Connects to Discord for slash commands (gateway only — no voice receive, which is broken
+against Discord's current protocol), captures audio locally with parec (your mic OR your
+computer's output), transcribes on the GPU, runs the anticipation pipeline, and posts
+buzzes to the channel.
 
-The anticipation itself runs on the VPS (lebot.djiang.xyz /analyze) so no API key is
-needed here — this process only does Discord audio + Whisper STT.
+Slash commands:
+  /listen source:<mic|computer> [category]   start listening
+  /stop                                        stop
+  /status                                      what it's doing
+
+Runs LOCALLY only. Holds no Claude key — anticipation is a POST to the VPS.
 """
-import asyncio
+import glob
 import os
+import subprocess
 import threading
+import time
 from pathlib import Path
 
 import httpx
 import numpy as np
 import discord
-from discord.ext import commands, voice_recv
 from faster_whisper import WhisperModel
 
 
@@ -33,15 +35,30 @@ def _load_env():
 _load_env()
 TOKEN = os.environ["DISCORD_TOKEN"]
 LEBOT_URL = os.environ.get("LEBOT_URL", "https://lebot.djiang.xyz")
-CATEGORIES = {"BIOLOGY", "CHEMISTRY", "PHYSICS", "EARTH_SPACE", "MATH", "ENERGY", "OTHER"}
+RATE = 16000
+CATS = ["BIOLOGY", "CHEMISTRY", "PHYSICS", "EARTH_SPACE", "MATH", "ENERGY", "OTHER"]
 
-print("loading Whisper…")
-try:
-    _model = WhisperModel("base.en", device="cuda", compute_type="float16")
-    print("Whisper on GPU (base.en, float16)")
-except Exception as e:
-    print(f"GPU unavailable ({e}); falling back to CPU")
-    _model = WhisperModel("base.en", device="cpu", compute_type="int8")
+
+def _load_whisper():
+    import ctypes
+    try:
+        import nvidia
+        base = list(nvidia.__path__)[0]
+        for so in sorted(glob.glob(os.path.join(base, "*", "lib", "*.so*"))):
+            try:
+                ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass
+        m = WhisperModel("small.en", device="cuda", compute_type="float16")
+        print("Whisper on GPU (RTX 4060)", flush=True)
+        return m
+    except Exception as e:
+        print(f"GPU unavailable ({str(e)[:60]}); CPU", flush=True)
+        return WhisperModel("small.en", device="cpu", compute_type="int8")
+
+
+print("loading Whisper…", flush=True)
+_model = _load_whisper()
 
 
 def _transcribe(audio):
@@ -49,130 +66,142 @@ def _transcribe(audio):
     return " ".join(s.text for s in segs).strip()
 
 
-class Session:
-    """One question's rolling audio buffer + state."""
+def _mic_source():
+    return subprocess.run(["pactl", "get-default-source"], capture_output=True, text=True).stdout.strip()
+
+
+def _computer_source():
+    sink = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True).stdout.strip()
+    return f"{sink}.monitor"
+
+
+def _rms(a):
+    return float(np.sqrt(np.mean(a * a))) if len(a) else 0.0
+
+
+def _post(channel_id, msg):
+    try:
+        httpx.post(f"https://discord.com/api/v10/channels/{channel_id}/messages",
+                   headers={"Authorization": f"Bot {TOKEN}"},
+                   json={"content": msg[:1900]}, timeout=10)
+    except Exception as e:
+        print("post err:", e, flush=True)
+
+
+class Listener:
+    """Captures one audio source, transcribes, anticipates, buzzes — until stopped."""
     def __init__(self):
-        self.buf = bytearray()
-        self.lock = threading.Lock()
-        self.active = False
-        self.buzzed = False
-        self.category = "OTHER"
-        self.last_words = 0
+        self._stop = threading.Event()
+        self.thread = None
+        self.status = "idle"
 
-    def add_pcm(self, pcm):
-        with self.lock:
-            self.buf.extend(pcm)
+    def start(self, source, category, channel_id):
+        self.stop()
+        self._stop.clear()
+        self.status = f"listening ({category}) on {source.split('.')[0][-24:]}"
+        self.thread = threading.Thread(
+            target=self._run, args=(source, category, channel_id), daemon=True)
+        self.thread.start()
 
-    def audio16k(self):
-        """48 kHz stereo s16le (Discord) -> 16 kHz mono float32 (Whisper)."""
-        with self.lock:
-            raw = bytes(self.buf)
-        if len(raw) < 4:
-            return None
-        a = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-        a = a.reshape(-1, 2).mean(axis=1)   # stereo -> mono
-        a = a[::3]                          # 48k -> 16k (exact 3:1). ponytail: crude decimate,
-        return a / 32768.0                  # add a low-pass if aliasing hurts accuracy
+    def stop(self):
+        self._stop.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=3)
+        self.status = "idle"
 
+    def _run(self, source, category, channel_id):
+        buf = bytearray()
+        lock = threading.Lock()
 
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-sessions = {}          # guild_id -> Session
+        def reader():
+            p = subprocess.Popen(
+                ["parec", "--format=s16le", f"--rate={RATE}", "--channels=1",
+                 "-d", source, "--latency-msec=100"], stdout=subprocess.PIPE)
+            self._parec = p
+            while not self._stop.is_set():
+                chunk = p.stdout.read(3200)
+                if not chunk:
+                    break
+                with lock:
+                    buf.extend(chunk)
+            p.terminate()
 
+        threading.Thread(target=reader, daemon=True).start()
 
-def _sink(session):
-    def cb(user, data: voice_recv.VoiceData):
-        if user and getattr(user, "bot", False):
-            return
-        session.add_pcm(data.pcm)
-    return voice_recv.BasicSink(cb)
-
-
-async def _loop(session, channel):
-    """Every ~1s: transcribe the whole question so far, and if new words landed, ask the
-    VPS whether to buzz. Posts a throttled live line + a big BUZZ when it commits."""
-    loop = asyncio.get_event_loop()
-    async with httpx.AsyncClient(timeout=20) as client:
-        while session.active:
-            await asyncio.sleep(1.0)
-            audio = session.audio16k()
-            if audio is None or len(audio) < 16000 * 0.6:   # < 0.6s of audio
+        client = httpx.Client(timeout=20)
+        history, last_words, silent, buzzed = [], 0, 0, False
+        SPEECH, QUIET = 0.004, 0.0035
+        while not self._stop.is_set():
+            time.sleep(1.2)
+            with lock:
+                raw = bytes(buf)
+            if len(raw) < RATE * 2 * 0.6:
                 continue
-            text = await loop.run_in_executor(None, _transcribe, audio)
-            nwords = len(text.split())
-            if nwords <= session.last_words or nwords == 0:
-                continue
-            session.last_words = nwords
-            try:
-                r = await client.post(f"{LEBOT_URL}/analyze", json={
-                    "prefix": text, "category": session.category,
-                    "total_words": max(40, nwords * 2)})
-                d = r.json()
-            except Exception as e:
-                print("analyze error:", e)
-                continue
-            guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
-            print(f"[{nwords}w P={p}] {text[-60:]!r} -> {guess}")
-            if d.get("buzzes") and not session.buzzed:
-                session.buzzed = True
-                await channel.send(f"⚡ **BUZZ** — **{guess}**   (P={p}, {nwords} words heard)\n> {text}")
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            rms, tail = _rms(audio), _rms(audio[-int(RATE * 0.8):])
+            if rms > SPEECH:
+                gain = min(10.0, 0.06 / max(rms, 0.004))
+                text = _transcribe((audio * gain).astype(np.float32))
+                nwords = len(text.split())
+                if text and nwords > last_words:
+                    last_words = nwords
+                    try:
+                        d = client.post(f"{LEBOT_URL}/analyze", json={
+                            "prefix": text, "category": category,
+                            "total_words": max(40, nwords * 2), "history": history}).json()
+                    except Exception:
+                        d = {}
+                    history.append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
+                    guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
+                    print(f"[{nwords:2}w P={p:.2f} → {guess[:22]}] …{text[-45:]}", flush=True)
+                    if d.get("buzzes") and not buzzed:
+                        buzzed = True
+                        _post(channel_id, f"⚡ **BUZZ** — **{guess}**  (P={p}, {nwords} words)\n> {text}")
+            if tail < QUIET:
+                silent += 1
+                if silent >= 5 and last_words > 0:
+                    print("— reset —", flush=True)
+                    with lock:
+                        buf.clear()
+                    history, last_words, silent, buzzed = [], 0, 0, False
+            else:
+                silent = 0
+            if len(audio) > RATE * 40:
+                with lock:
+                    buf.clear()
+                last_words = 0
+
+
+listener = Listener()
+bot = discord.Bot(intents=discord.Intents.default())
 
 
 @bot.event
 async def on_ready():
-    print(f"logged in as {bot.user}")
+    await bot.sync_commands(guild_ids=[g.id for g in bot.guilds], force=True)
+    print(f"logged in as {bot.user} — ready", flush=True)
 
 
-@bot.command()
-async def join(ctx):
-    if not ctx.author.voice:
-        await ctx.send("Join a voice channel first, then `!join`.")
-        return
-    ch = ctx.author.voice.channel
-    if ctx.voice_client:
-        await ctx.voice_client.move_to(ch)
-    else:
-        await ch.connect(cls=voice_recv.VoiceRecvClient)
-    sessions[ctx.guild.id] = Session()
-    await ctx.send(f"In **{ch.name}**. `!go [category]` to start a question.")
+@bot.slash_command(name="listen", description="Start listening (mic = you read, computer = Discord call audio)")
+async def listen_cmd(
+    ctx: discord.ApplicationContext,
+    source: discord.Option(str, "Audio source", choices=["mic", "computer"]) = "mic",
+    category: discord.Option(str, "Question category", choices=CATS) = "OTHER",
+):
+    src = _mic_source() if source == "mic" else _computer_source()
+    listener.start(src, category.upper(), ctx.channel_id)
+    await ctx.respond(f"🎧 Listening to **{source}** ({category}). I'll buzz here. `/stop` to end.")
 
 
-@bot.command()
-async def go(ctx, category: str = "OTHER"):
-    vc = ctx.voice_client
-    if not vc:
-        await ctx.send("`!join` first.")
-        return
-    s = sessions.setdefault(ctx.guild.id, Session())
-    s.__init__()
-    s.category = category.upper() if category.upper() in CATEGORIES else "OTHER"
-    s.active = True
-    if vc.is_listening():
-        vc.stop_listening()
-    vc.listen(_sink(s))
-    asyncio.create_task(_loop(s, ctx.channel))
-    await ctx.send(f"🎧 Listening ({s.category}). Read the question…")
+@bot.slash_command(name="stop", description="Stop listening")
+async def stop_cmd(ctx: discord.ApplicationContext):
+    listener.stop()
+    await ctx.respond("⏹️ Stopped.")
 
 
-@bot.command()
-async def stop(ctx):
-    s = sessions.get(ctx.guild.id)
-    if s:
-        s.active = False
-    if ctx.voice_client and ctx.voice_client.is_listening():
-        ctx.voice_client.stop_listening()
-    await ctx.send("Stopped." + ("" if not s or s.buzzed else " (never buzzed)"))
-
-
-@bot.command()
-async def leave(ctx):
-    s = sessions.get(ctx.guild.id)
-    if s:
-        s.active = False
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-    await ctx.send("👋")
+@bot.slash_command(name="status", description="What is LeBot doing?")
+async def status_cmd(ctx: discord.ApplicationContext):
+    await ctx.respond(f"Status: {listener.status}")
 
 
 if __name__ == "__main__":
