@@ -234,10 +234,10 @@ def anticipate_sa(prefix, category, n=1, model=None):
 
 
 def anticipate_fast(prefix, category, n=3):
-    """Low-latency anticipation for the LIVE bot: Haiku voted recall only — no calculator,
-    no verbose reasoning pass. ~0.4s vs ~2-7s for anticipate_best/verbose. Less accurate on
-    hard recall, but fast enough to keep up with a reader. -> (answer, 'recall')."""
-    ans = _vote(anticipate_sa(prefix, category, n=n, model=FAST))
+    """Live-bot anticipation: Sonnet voted recall, but WITHOUT the calculator (a 500-token
+    call that made the full path 2-7s) or the verbose pass. ~1.5s and robust to garbled
+    live transcripts — Haiku returned UNKNOWN far too often. -> (answer, 'recall')."""
+    ans = _vote(anticipate_sa(prefix, category, n=n))   # default model = Sonnet
     resolved, is_excl = resolve_exclusion(ans, prefix)
     if is_excl:
         return resolved, "recall"

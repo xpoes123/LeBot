@@ -94,7 +94,7 @@ def _answer(client, text, category, history):
     try:
         d = client.post(f"{LEBOT_URL}/analyze", json={
             "prefix": text, "category": category,
-            "total_words": max(40, len(text.split()) * 2),
+            "total_words": 45,
             "history": history, "fast": False}, timeout=15).json()
         return d.get("guess", "?")
     except Exception:
@@ -142,58 +142,73 @@ class Listener:
         threading.Thread(target=reader, daemon=True).start()
 
         client = httpx.Client(timeout=20)
-        history, last_words, stale, buzzed = [], 0, 0, False
-        last_text = ""
+        st = {"history": [], "buzzed": False, "best": ""}   # shared with async worker
+        inflight = threading.Event()
+        committed, done_bytes, last_words, stale = "", 0, 0, 0
+        CHUNK = int(RATE * 2 * 1.0)             # transcribe in ~1s increments (bytes)
         SPEECH = 0.004
-        while not self._stop.is_set():
-            time.sleep(0.8)
-            with lock:
-                raw = bytes(buf)
-            if len(raw) < RATE * 2 * 0.6:
-                continue
-            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-            grew = False
-            if _rms(audio) > SPEECH:
-                gain = min(10.0, 0.06 / max(_rms(audio), 0.004))
-                text = _transcribe((audio * gain).astype(np.float32))
-                nwords = len(text.split())
-                if text and nwords > last_words:
-                    grew, last_words, last_text = True, nwords, text
-                    # BUZZER (Haiku, fast): P = confidence our system can answer if we
-                    # commit now — NOT whether Haiku already has it right.
-                    try:
-                        d = client.post(f"{LEBOT_URL}/analyze", json={
-                            "prefix": text, "category": category, "total_words": max(40, nwords * 2),
-                            "history": history, "fast": True}).json()
-                    except Exception:
-                        d = {}
-                    history.append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
-                    p = d.get("p_buzz", 0)
-                    print(f"[{nwords:2}w P={p:.2f} → {d.get('guess','?')[:22]}] …{text[-45:]}", flush=True)
-                    if d.get("buzzes") and not buzzed:
-                        buzzed = True
-                        # ANSWERER (Sonnet): work out the real answer in the buzz window
-                        _post(channel_id, f"⚡ **BUZZ** (word {nwords}, confidence {p:.0%}) — working out the answer…")
-                        ans = _answer(client, text, category, history)
-                        _post(channel_id, f"🧠 **{ans}**\n> {text}")
 
-            # end of question = transcript stopped growing for ~5s (volume-independent)
+        t0 = time.time()
+
+        def analyze_worker(text, nwords):
+            ta = time.time()
+            try:
+                d = client.post(f"{LEBOT_URL}/analyze", json={
+                    "prefix": text, "category": category, "total_words": 45,
+                    "history": st["history"], "fast": True}, timeout=15).json()
+            except Exception:
+                d = {}
+            st["history"].append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
+            guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
+            if guess and guess.upper() != "UNKNOWN":
+                st["best"] = guess          # Haiku's answer is already here — no extra call
+            print(f"  analyze[{nwords}w] {time.time()-ta:.1f}s  P={p:.2f} → {guess[:20]}", flush=True)
+            if d.get("buzzes") and not st["buzzed"]:
+                st["buzzed"] = True
+                _post(channel_id, f"⚡ **BUZZ** (word {nwords}, {p:.0%}) — **{guess}**\n> {text}")
+            inflight.clear()
+
+        while not self._stop.is_set():
+            time.sleep(0.4)
+            with lock:
+                total = len(buf)
+                new = bytes(buf[done_bytes:])
+
+            grew = False
+            if len(new) >= CHUNK:            # transcribe only NEW audio (fast, ~0.1s)
+                done_bytes = total
+                a = np.frombuffer(new, dtype=np.int16).astype(np.float32) / 32768.0
+                ts = time.time()
+                if _rms(a) > SPEECH:
+                    gain = min(10.0, 0.06 / max(_rms(a), 0.004))
+                    seg = _transcribe((a * gain).astype(np.float32))
+                    if seg:
+                        committed = (committed + " " + seg).strip()
+                nwords = len(committed.split())
+                # wall = seconds since start; audio = seconds of sound captured so far.
+                # if wall >> audio, we're falling behind real time.
+                print(f"[wall={time.time()-t0:4.1f}s audio={total/(RATE*2):4.1f}s "
+                      f"stt={time.time()-ts:.2f}s {nwords}w]", flush=True)
+                if nwords > last_words:
+                    grew, last_words = True, nwords
+                    if not inflight.is_set():
+                        inflight.set()
+                        threading.Thread(target=analyze_worker, args=(committed, nwords),
+                                         daemon=True).start()
+
             if grew:
                 stale = 0
             elif last_words > 0:
                 stale += 1
-                if stale >= 5:
-                    if not buzzed:   # never confident enough; still answer (fully-read = free)
-                        ans = _answer(client, last_text, category, history)
-                        _post(channel_id, f"🔔 **(end of question)** — **{ans}**\n> {last_text}")
+                if stale >= 5:               # ~2s of no new words = question over
+                    if not st["buzzed"] and st["best"]:
+                        _post(channel_id, f"🔔 **(end of question)** — **{st['best']}**\n> {committed}")
                     print("— reset —", flush=True)
                     with lock:
                         buf.clear()
-                    history, last_words, stale, buzzed, last_text = [], 0, 0, False, ""
-            if len(audio) > RATE * 45:
-                with lock:
-                    buf.clear()
-                last_words = 0
+                    committed, done_bytes, last_words, stale = "", 0, 0, 0
+                    st["history"], st["buzzed"], st["best"] = [], False, ""
+                    inflight.clear()
 
 
 listener = Listener()
