@@ -241,7 +241,7 @@ def anticipate_fast(prefix, category, n=3):
     resolved, is_excl = resolve_exclusion(ans, prefix)
     if is_excl:
         return resolved, "recall"
-    if _list_prior_guess(resolved, prefix):
+    if _list_prior_guess(resolved, prefix) or _parrots_stem(resolved, prefix):
         resolved = "UNKNOWN"
     return resolved, "recall"
 
@@ -339,7 +339,7 @@ def anticipate_sa_verbose(prefix, category):
         resolved, is_excl = resolve_exclusion(ans, prefix)
         if is_excl:  # "all except X" -> grounded exclusion, bypass the blind guard
             return reasoning, resolved
-        if _list_prior_guess(resolved, prefix):  # blind index-guess before items shown
+        if _list_prior_guess(resolved, prefix) or _parrots_stem(resolved, prefix):
             return reasoning, "UNKNOWN"
         return reasoning, resolved
     return raw.strip(), "UNKNOWN"  # no clean ANSWER line -> don't leak reasoning as answer
@@ -359,6 +359,17 @@ def _vote(cands):
 
 
 _NUMWORD = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+
+
+def _parrots_stem(ans, prefix):
+    """The answer to a toss-up is almost never a phrase read VERBATIM in the question. If
+    the guess is a multi-word phrase already present in the stem, it's parroting — e.g.
+    guessing 'cytotoxic T cells' off 'Granzyme B, secreted by cytotoxic T cells, activates
+    ...'. Reject it. (Single words can legitimately recur, so only guard phrases.)"""
+    a = _norm(ans)
+    if not a or a == "unknown" or len(a.split()) < 2:
+        return False
+    return a in _norm(prefix)
 
 
 def _list_prior_guess(ans, prefix):
@@ -455,7 +466,7 @@ def anticipate_best(prefix, category, n=3):
     resolved, is_excl = resolve_exclusion(ans, prefix)
     if is_excl:
         return resolved, "recall"  # grounded exclusion ("all except X") -> bypass blind guard
-    if _list_prior_guess(resolved, prefix):
+    if _list_prior_guess(resolved, prefix) or _parrots_stem(resolved, prefix):
         resolved = "UNKNOWN"
     return resolved, "recall"
 

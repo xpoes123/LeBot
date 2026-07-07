@@ -120,7 +120,7 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
         p *= 0.6
     # Hard gate: Haiku UNKNOWN = stem incomplete, don't buzz regardless of P
     return dict(mode=mode, stability_run=run, churn=churn, frac=round(frac, 3),
-                p_buzz=round(p, 3), buzzes=p >= BUZZ_T and not haiku_no_guess,
+                p_buzz=round(p, 3), buzzes=p >= BUZZ_T and run >= 2 and not haiku_no_guess,
                 haiku_vote=haiku_guess, agrees=agrees)
 
 
@@ -195,7 +195,7 @@ def _value_steps(category, words, total, indices):
                            np.log1p(total), 1.0 if r["mode"] in ("calc", "seq") else 0.0] + cat_vec])
         p = float(_clf.predict_proba(feats)[0, 1])
         steps.append({**r, "phase": "stem", "stability_run": run, "churn": churn,
-                      "frac": round(frac, 3), "p_buzz": round(p, 3), "buzzes": p >= BUZZ_T})
+                      "frac": round(frac, 3), "p_buzz": round(p, 3), "buzzes": p >= BUZZ_T and run >= 2})
     return steps
 
 
