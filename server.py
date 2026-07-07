@@ -200,39 +200,47 @@ def _mc_epilogue(req: FullReq, stem_steps, total):
     buzzes the moment the matching choice is read. If it already committed (buzzed) during
     the stem, that stem buzz stands and the options just confirm the letter."""
     opts = req.options
-    # For W/X/Y/Z MC, do NOT commit mid-stem: the choices are read AFTER the stem and they
-    # reveal the answer FORMAT (e.g. current direction in/out), which a bare mid-stem value
-    # can get wrong. Anticipate across the whole stem, then buzz at the matching choice
-    # using the fullest, most stable value the bot settled on.
+    # For W/X/Y/Z MC, do NOT commit mid-stem: the choices are read AFTER the stem. Some
+    # questions ("which of these is NOT X", "which best describes...") can only be answered
+    # by REASONING OVER THE CHOICES, not by anticipating a value — so the authoritative
+    # answer is guess() over the full stem + all four choices. The stem value-anticipation
+    # is kept only to show what the bot was thinking as it listened.
     for s in stem_steps:
         s["buzzes"] = False
-    value = next((s["guess"] for s in reversed(stem_steps)
-                  if s["guess"] and s["guess"].upper() != "UNKNOWN"), None)
+    stem_value = next((s["guess"] for s in reversed(stem_steps)
+                       if s["guess"] and s["guess"].upper() != "UNKNOWN"), None)
 
-    matches = [False, False, False, False]
-    matched = None
-    if value:
+    # 1. If the bot anticipated a concrete value (recall/compute), match it to a choice.
+    matched, conf, votes = None, 0.0, []
+    if stem_value:
         for k, text in enumerate(opts):
-            if answerer.judge(value, text):
-                matches[k], matched = True, MC_LETTERS[k]
+            if answerer.judge(stem_value, text):
+                matched, conf = MC_LETTERS[k], 1.0
                 break
+    # 2. Otherwise the answer must be SELECTED by reasoning over the choices themselves
+    #    ("which of these is NOT X", "which best describes...") -> guess over all options.
+    if not matched:
+        votes = answerer.guess(req.stem, opts, req.category, n=5)
+        matched, conf = answerer.consensus_debiased(votes, req.stem, opts)
+        if matched and conf < 0.5:
+            matched = None
 
     option_steps = []
     for k, (L, text) in enumerate(zip(MC_LETTERS, opts)):
-        is_match = matches[k]
-        buzz = is_match and value is not None  # buzz when the matching choice is read
+        is_match = (L == matched)
         option_steps.append({
             "widx": total + k + 1, "phase": "option", "letter": L, "option": text,
-            "guess": f"{L} — {text}" if is_match else (value or "UNKNOWN"),
-            "matches": is_match, "buzzes": buzz, "mode": "option",
-            "p_buzz": stem_steps[-1]["p_buzz"] if stem_steps else 0.0,
+            "guess": f"{L} — {text}" if is_match else (stem_value or text),
+            "matches": is_match, "buzzes": is_match, "mode": "option",
+            "p_buzz": round(conf, 3) if is_match else 0.0,
             "stability_run": 0, "churn": 0, "frac": 1.0, "reasoning": "",
-            "haiku_vote": "", "agrees": None,
+            "haiku_vote": "".join(v[0] if v and v[0] in MC_LETTERS else "." for v in votes),
+            "agrees": None,
         })
 
     return {
-        "mode": "mc", "options": opts, "answer_value": value, "matched_letter": matched,
-        "committed_widx": None,
+        "mode": "mc", "options": opts, "answer_value": stem_value, "matched_letter": matched,
+        "mc_conf": round(conf, 3), "committed_widx": None,
         "steps": stem_steps + option_steps, "total_words": total, "stem_words": total,
     }
 
