@@ -19,4 +19,19 @@ assert not _list_prior_guess("2.5", "what is the current in the circuit at t = 1
 # normal word answer -> not a list at all
 assert not _list_prior_guess("Transducin", S)
 
+# --- exclusion resolution: "all except X" -> indices, before all items are read ---
+from answerer import resolve_exclusion
+
+P = "Identify all of the following 3 senses whose signals relay through the thalamus: 1) Vision, 2) Olfaction,"
+# heard olfaction (item 2), item 3 not yet read -> "all except olfaction" = 1, 3
+assert resolve_exclusion("all except olfaction", P) == ("1, 3", True)
+assert resolve_exclusion("all but 2", P) == ("1, 3", True)
+# "none except" -> only the named ones
+assert resolve_exclusion("none except olfaction", P) == ("2", True)
+# a plain index answer is NOT an exclusion -> passthrough
+assert resolve_exclusion("1, 3", P) == ("1, 3", False)
+assert resolve_exclusion("mitochondria", P) == ("mitochondria", False)
+# can't identify the exception -> don't fabricate
+assert resolve_exclusion("all except taste", P) == ("all except taste", False)
+
 print("ok")

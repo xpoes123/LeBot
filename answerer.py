@@ -156,10 +156,24 @@ If none of the items are guaranteed, the answer is "0" (none) — this is a vali
 common answer; do not force-pick an item just because the format lists several.
 
 CRITICAL — multi-select ("identify all") questions: evaluate EACH numbered item \
-INDEPENDENTLY as true/false, then report the full set that qualifies. The most common \
-answer is a PAIR (two items), not one — do NOT stop at the first item that fits and \
-answer it alone. Give every qualifying index (e.g. "1, 3"); "0"/none and "1, 2, 3"/all \
-are both valid.
+INDEPENDENTLY as true/false, then report the COMPLETE set that qualifies (most answers are \
+a PAIR; "0"/none and all are equally valid — do not force a nonzero answer). While items \
+are STILL being read, do NOT commit a partial set: either answer by exclusion (below) or \
+reply UNKNOWN until you can give the whole answer. Once EVERY item has been read, always \
+give your best complete set — never abstain on a fully-read question.
+ANSWER EARLY BY EXCLUSION — the key skill for "identify all" questions with a GENERAL \
+RULE and a famous EXCEPTION. The stem states the item count, so you do NOT need to hear \
+every item:
+- Before any items have been read: reply UNKNOWN (you cannot name an exception you have \
+not heard).
+- The MOMENT you hear the EXCEPTION item (one you know breaks the general rule), answer \
+EXACTLY "all except <that item's name>" — every other item follows the rule, so you commit \
+without hearing the rest. (Use "none except <name>" if instead only the exceptions qualify.) \
+NEVER write index numbers for items you have not yet heard.
+- Only once ALL items have been read aloud may you answer with an index list like "1, 3".
+Example: "identify all 3 amino acids that are chiral: 1) Alanine, 2) Glycine, 3) ..." — \
+glycine is the sole achiral amino acid, so the instant you hear glycine answer "all except \
+glycine", before item 3 is read. Only use exclusion when you are CERTAIN of the general rule.
 
 ANSWER FORM (Science Bowl scoring): give the NAME of a concept, not a description \
 ("Newton's second law", not "F=ma"; canonical symbols like "c" are fine). For a person, \
@@ -177,7 +191,7 @@ def _clean_answer(r):
     r = r.split("\n")[0]
     # drop a lead-in like "The answer is" / "Answer:" the model sometimes prepends
     r = re.sub(r"(?i)^(the\s+)?answer\s+is\s*:?\s*|^answer\s*:\s*", "", r).strip()
-    r = re.split(r"\s+(?:\(|—|–| - |, which| because| since| is | are | refers)", r)[0]
+    r = re.split(r"\s+(?:\(|—|–|-\s|,\s*which\b|because\b|since\b|is\b|are\b|refers\b)", r)[0]
     r = r.strip().strip(".").strip()
     if not r:
         return "UNKNOWN"
@@ -309,9 +323,12 @@ def anticipate_sa_verbose(prefix, category):
         parts = after.split("\n", 1)
         reasoning = parts[1].strip() if len(parts) > 1 else ""
         ans = _clean_answer(parts[0])
-        if _list_prior_guess(ans, prefix):  # blind index-guess before items shown
+        resolved, is_excl = resolve_exclusion(ans, prefix)
+        if is_excl:  # "all except X" -> grounded exclusion, bypass the blind guard
+            return reasoning, resolved
+        if _list_prior_guess(resolved, prefix):  # blind index-guess before items shown
             return reasoning, "UNKNOWN"
-        return reasoning, ans
+        return reasoning, resolved
     return raw.strip(), "UNKNOWN"  # no clean ANSWER line -> don't leak reasoning as answer
 
 
@@ -361,6 +378,55 @@ def _is_list_q(prefix):
         w in prefix.lower() for w in ("identify all", "order the", "rank the"))
 
 
+def _declared_count(prefix):
+    m = re.search(r"following\s+(\w+|\d+)", prefix.lower())
+    if not m:
+        return None
+    w = m.group(1)
+    return _NUMWORD.get(w) or (int(w) if w.isdigit() else None)
+
+
+def _list_items(prefix):
+    """{index: item text lowercased} parsed from 'N) ...' in the stem so far."""
+    return {int(i): t.strip().lower()
+            for i, t in re.findall(r"(\d+)\)\s*([^;:\n]+?)(?=\s*\d+\)|[;:\n]|$)", prefix)}
+
+
+def resolve_exclusion(ans, prefix):
+    """Convert an EXCLUSION answer ('all except olfaction', 'all but 2', 'none except 3')
+    into an index list, using the declared item count + the numbered items heard so far.
+    This is how you answer a multi-select before all items are read — you only need the
+    exception, since every other item satisfies the general rule. Returns (indices_str,
+    True) when it resolves an exclusion, else (ans, False)."""
+    a = (ans or "").strip().lower().rstrip(".")
+    m = re.match(r"^(all|none)\s+(?:but|except|besides|other than)\s+(.+)$", a)
+    if not m:
+        return ans, False
+    base, exc = m.group(1), m.group(2)
+    declared = _declared_count(prefix)
+    items = _list_items(prefix)
+    if not declared:
+        declared = max(items) if items else None
+    if not declared:
+        return ans, False
+    excluded = set()
+    for tok in re.split(r"\s*(?:,|and)\s*", exc):
+        tok = tok.strip().strip(".").strip()
+        if tok.isdigit():
+            excluded.add(int(tok))
+        else:
+            for idx, name in items.items():
+                if tok and (tok in name or name in tok):
+                    excluded.add(idx)
+    if not excluded:
+        return ans, False  # couldn't identify the exception -> don't fabricate
+    if base == "all":
+        result = [i for i in range(1, declared + 1) if i not in excluded]
+    else:  # "none except X" -> only the named ones qualify
+        result = sorted(excluded)
+    return (", ".join(map(str, result)) if result else "0"), True
+
+
 def anticipate_best(prefix, category, n=3):
     """Router: numbers present -> COMPUTE (calculator, exact); else recall via
     majority-voted gut answers. -> (answer, mode='calc'|'recall'). The calculator
@@ -373,9 +439,12 @@ def anticipate_best(prefix, category, n=3):
         if v is not None:
             return v, "calc"
     ans = _vote(anticipate_sa(prefix, category, n=n))
-    if _list_prior_guess(ans, prefix):
-        ans = "UNKNOWN"
-    return ans, "recall"
+    resolved, is_excl = resolve_exclusion(ans, prefix)
+    if is_excl:
+        return resolved, "recall"  # grounded exclusion ("all except X") -> bypass blind guard
+    if _list_prior_guess(resolved, prefix):
+        resolved = "UNKNOWN"
+    return resolved, "recall"
 
 
 def stream_answer(prefix, category):

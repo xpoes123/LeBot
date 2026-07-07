@@ -9,6 +9,9 @@ assert _clean_answer("First, we compute the") == "UNKNOWN"
 assert _clean_answer("Given the quantum number is") == "UNKNOWN"
 assert _clean_answer("When the reservoir cools") == "UNKNOWN"
 assert _clean_answer("Therefore, the value is 5") == "UNKNOWN"
+# "X is Y..." explanation gets cut at "is" (regex bug fix)
+assert _clean_answer("The olfactory sense is the classic exception") == "The olfactory sense"
+assert _clean_answer("ATP synthase is the enzyme that makes ATP") == "ATP synthase"
 # dangling connective/article = truncated mid-phrase
 assert _clean_answer("coefficient of") == "UNKNOWN"
 assert _clean_answer("the rate of change and") == "UNKNOWN"
