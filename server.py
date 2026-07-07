@@ -155,21 +155,31 @@ def _value_steps(category, words, total, indices):
     calibrated LR-buzzer P. Shared by short-answer and MC (the stem phase is identical)."""
     def one(widx):
         prefix = " ".join(words[:widx])
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            fh = ex.submit(answerer.anticipate_best, prefix, category, 3)
-            fv = ex.submit(answerer.anticipate_sa_verbose, prefix, category)
-            haiku_guess, mode = fh.result()
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            fs = ex.submit(answerer.anticipate_best, prefix, category, 3)      # Sonnet + calc
+            fv = ex.submit(answerer.anticipate_sa_verbose, prefix, category)   # Sonnet verbose
+            fk = ex.submit(answerer._vote,                                     # INDEPENDENT Haiku
+                           answerer.anticipate_sa(prefix, category, n=3, model=answerer.FAST))
+            sonnet_best, mode = fs.result()
             reasoning, sonnet_guess = fv.result()
+            haiku = fk.result()
         if mode == "seq":
-            guess = haiku_guess
+            guess = sonnet_best
         elif mode == "calc":
-            guess = _prefer_qualified(haiku_guess, sonnet_guess)
+            guess = _prefer_qualified(sonnet_best, sonnet_guess)
         elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
             guess = sonnet_guess
         else:
-            guess = haiku_guess
-        agrees = _norm(haiku_guess) == _norm(guess) if guess and guess.upper() != "UNKNOWN" else None
-        return {"widx": widx, "guess": guess, "mode": mode, "haiku_vote": haiku_guess,
+            guess = sonnet_best
+        # cross-model agreement: exact answers (calc/seq) are self-verified; otherwise an
+        # INDEPENDENT Haiku vote must confirm Sonnet — the correctness signal that separates
+        # premature guesses ("apoptosis") from settled ones (both models say "caspases").
+        if mode in ("calc", "seq"):
+            agrees = True
+        else:
+            agrees = bool(guess and guess.upper() != "UNKNOWN" and haiku
+                          and haiku.upper() != "UNKNOWN" and _norm(haiku) == _norm(guess))
+        return {"widx": widx, "guess": guess, "mode": mode, "haiku_vote": haiku,
                 "agrees": agrees, "reasoning": _reason_text(mode, reasoning)}
 
     with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
@@ -194,8 +204,12 @@ def _value_steps(category, words, total, indices):
         feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
                            np.log1p(total), 1.0 if r["mode"] in ("calc", "seq") else 0.0] + cat_vec])
         p = float(_clf.predict_proba(feats)[0, 1])
+        # buzz when confident (P) AND cross-model confirmed (Haiku independently agrees with
+        # Sonnet) — agreement replaces the stability gate: it's a stronger correctness signal
+        # and lets a question that only settles on its last word still buzz.
         steps.append({**r, "phase": "stem", "stability_run": run, "churn": churn,
-                      "frac": round(frac, 3), "p_buzz": round(p, 3), "buzzes": p >= BUZZ_T and run >= 2})
+                      "frac": round(frac, 3), "p_buzz": round(p, 3),
+                      "buzzes": p >= BUZZ_T and r["agrees"]})
     return steps
 
 
