@@ -129,44 +129,56 @@ class Listener:
         threading.Thread(target=reader, daemon=True).start()
 
         client = httpx.Client(timeout=20)
-        history, last_words, silent, buzzed = [], 0, 0, False
-        SPEECH, QUIET = 0.004, 0.0035
+        history, last_words, stale, buzzed = [], 0, 0, False
+        best_guess, best_p = "", 0.0
+        SPEECH = 0.004
         while not self._stop.is_set():
-            time.sleep(1.2)
+            time.sleep(0.8)
             with lock:
                 raw = bytes(buf)
             if len(raw) < RATE * 2 * 0.6:
                 continue
             audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-            rms, tail = _rms(audio), _rms(audio[-int(RATE * 0.8):])
-            if rms > SPEECH:
-                gain = min(10.0, 0.06 / max(rms, 0.004))
+            grew = False
+            if _rms(audio) > SPEECH:
+                gain = min(10.0, 0.06 / max(_rms(audio), 0.004))
+                t0 = time.time()
                 text = _transcribe((audio * gain).astype(np.float32))
+                t_stt = time.time() - t0
                 nwords = len(text.split())
                 if text and nwords > last_words:
-                    last_words = nwords
+                    grew, last_words = True, nwords
+                    t1 = time.time()
                     try:
                         d = client.post(f"{LEBOT_URL}/analyze", json={
                             "prefix": text, "category": category,
-                            "total_words": max(40, nwords * 2), "history": history}).json()
+                            "total_words": max(40, nwords * 2), "history": history, "fast": True}).json()
                     except Exception:
                         d = {}
+                    print(f"[timing buf={len(audio)/RATE:.0f}s stt={t_stt:.1f}s analyze={time.time()-t1:.1f}s]", flush=True)
                     history.append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
                     guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
+                    if guess and guess.upper() != "UNKNOWN":
+                        best_guess, best_p = guess, p
                     print(f"[{nwords:2}w P={p:.2f} → {guess[:22]}] …{text[-45:]}", flush=True)
                     if d.get("buzzes") and not buzzed:
                         buzzed = True
                         _post(channel_id, f"⚡ **BUZZ** — **{guess}**  (P={p}, {nwords} words)\n> {text}")
-            if tail < QUIET:
-                silent += 1
-                if silent >= 5 and last_words > 0:
+
+            # end of question = transcript stopped growing for ~5s (volume-independent)
+            if grew:
+                stale = 0
+            elif last_words > 0:
+                stale += 1
+                if stale >= 5:
+                    if not buzzed and best_guess:
+                        _post(channel_id, f"🔔 **(end of question) best guess** — **{best_guess}**  (P={best_p})")
                     print("— reset —", flush=True)
                     with lock:
                         buf.clear()
-                    history, last_words, silent, buzzed = [], 0, 0, False
-            else:
-                silent = 0
-            if len(audio) > RATE * 40:
+                    history, last_words, stale, buzzed = [], 0, 0, False
+                    best_guess, best_p = "", 0.0
+            if len(audio) > RATE * 45:
                 with lock:
                     buf.clear()
                 last_words = 0

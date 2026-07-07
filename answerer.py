@@ -210,9 +210,9 @@ def _clean_answer(r):
     return "UNKNOWN" if len(r.split()) > 7 or not r else r
 
 
-def anticipate_sa(prefix, category, n=1):
+def anticipate_sa(prefix, category, n=1, model=None):
     """Short-answer anticipation: predict the free-text answer from a cut-off stem.
-    Returns n predictions (each a TERSE answer, or 'UNKNOWN')."""
+    Returns n predictions (each a TERSE answer, or 'UNKNOWN'). model=FAST for low latency."""
     sys = META_SA.format(category=category)
 
     def one(_):
@@ -223,7 +223,7 @@ def anticipate_sa(prefix, category, n=1):
             "words (e.g. \"mitochondria\", \"contact metamorphism\", \"36 mph\"). "
             "NO sentence, NO explanation, do not write \"X is...\". "
             "If not yet determinable, reply UNKNOWN.\nAnswer:",
-            max_tokens=12, temperature=0.7,
+            max_tokens=12, temperature=0.7, model=model,
         )
         return _clean_answer(r)
 
@@ -231,6 +231,19 @@ def anticipate_sa(prefix, category, n=1):
         return [one(0)]
     with ThreadPoolExecutor(max_workers=n) as ex:
         return list(ex.map(one, range(n)))
+
+
+def anticipate_fast(prefix, category, n=3):
+    """Low-latency anticipation for the LIVE bot: Haiku voted recall only — no calculator,
+    no verbose reasoning pass. ~0.4s vs ~2-7s for anticipate_best/verbose. Less accurate on
+    hard recall, but fast enough to keep up with a reader. -> (answer, 'recall')."""
+    ans = _vote(anticipate_sa(prefix, category, n=n, model=FAST))
+    resolved, is_excl = resolve_exclusion(ans, prefix)
+    if is_excl:
+        return resolved, "recall"
+    if _list_prior_guess(resolved, prefix):
+        resolved = "UNKNOWN"
+    return resolved, "recall"
 
 
 import math

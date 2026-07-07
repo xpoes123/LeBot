@@ -42,6 +42,7 @@ class AnalyzeReq(BaseModel):
     category: str = "BIOLOGY"
     total_words: int = 50
     history: list[_Step] = []
+    fast: bool = False   # live bot: Haiku-only anticipation (~0.4s vs ~2-7s)
 
 
 _nsba4 = json.loads(Path("nsba4_questions.json").read_text())
@@ -59,6 +60,10 @@ def nsba4_questions():
 
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
+    if req.fast:  # low-latency live path: single Haiku anticipation, no verbose/calc
+        guess, mode = answerer.anticipate_fast(req.prefix, req.category, n=3)
+        buzz = _buzz_features(req, guess, mode, guess)
+        return {"guess": guess, "reasoning": "", **buzz}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
     with ThreadPoolExecutor(max_workers=2) as ex:
