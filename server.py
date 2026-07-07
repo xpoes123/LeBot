@@ -129,6 +129,21 @@ class FullReq(BaseModel):
 MC_LETTERS = ["W", "X", "Y", "Z"]
 
 
+def _prefer_qualified(calc_ans, verbose_ans):
+    """The calculator does exact arithmetic but strips physical qualifiers — a current's
+    direction, a vector's sign, "into the junction". A bare "2" then matches the wrong MC
+    option ("2 out" vs "2 in"). If the reasoning answer contains the SAME number and adds
+    a qualifier, prefer it (keeps calc's magnitude, restores the direction)."""
+    if not verbose_ans or verbose_ans.upper() == "UNKNOWN":
+        return calc_ans
+    if calc_ans and re.fullmatch(r"[\d/.,\s\-]+", calc_ans):  # calc answer is a bare number
+        cnum = re.sub(r"\D", "", calc_ans)
+        if cnum and cnum in re.sub(r"\D", "", verbose_ans) and \
+           len(verbose_ans.split()) > len(calc_ans.split()):
+            return verbose_ans
+    return calc_ans
+
+
 def _value_steps(category, words, total, indices):
     """Anticipate the ANSWER VALUE over stem prefixes (blind to any options — the way a
     player hears the stem before the choices). Returns the per-prefix trajectory with the
@@ -140,8 +155,10 @@ def _value_steps(category, words, total, indices):
             fv = ex.submit(answerer.anticipate_sa_verbose, prefix, category)
             haiku_guess, mode = fh.result()
             reasoning, sonnet_guess = fv.result()
-        if mode in ("calc", "seq"):
+        if mode == "seq":
             guess = haiku_guess
+        elif mode == "calc":
+            guess = _prefer_qualified(haiku_guess, sonnet_guess)
         elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
             guess = sonnet_guess
         else:
@@ -183,12 +200,15 @@ def _mc_epilogue(req: FullReq, stem_steps, total):
     buzzes the moment the matching choice is read. If it already committed (buzzed) during
     the stem, that stem buzz stands and the options just confirm the letter."""
     opts = req.options
-    committed = next((s for s in stem_steps if s["buzzes"] and s["guess"].upper() != "UNKNOWN"), None)
-    final = stem_steps[-1]["guess"] if stem_steps else "UNKNOWN"
-    value = committed["guess"] if committed else final
-    value = value if value and value.upper() != "UNKNOWN" else None
+    # For W/X/Y/Z MC, do NOT commit mid-stem: the choices are read AFTER the stem and they
+    # reveal the answer FORMAT (e.g. current direction in/out), which a bare mid-stem value
+    # can get wrong. Anticipate across the whole stem, then buzz at the matching choice
+    # using the fullest, most stable value the bot settled on.
+    for s in stem_steps:
+        s["buzzes"] = False
+    value = next((s["guess"] for s in reversed(stem_steps)
+                  if s["guess"] and s["guess"].upper() != "UNKNOWN"), None)
 
-    # map the anticipated value onto a choice (semantic; first match in reading order)
     matches = [False, False, False, False]
     matched = None
     if value:
@@ -200,8 +220,7 @@ def _mc_epilogue(req: FullReq, stem_steps, total):
     option_steps = []
     for k, (L, text) in enumerate(zip(MC_LETTERS, opts)):
         is_match = matches[k]
-        # buzz at the matching choice only if it did NOT already commit during the stem
-        buzz = is_match and committed is None and value is not None
+        buzz = is_match and value is not None  # buzz when the matching choice is read
         option_steps.append({
             "widx": total + k + 1, "phase": "option", "letter": L, "option": text,
             "guess": f"{L} — {text}" if is_match else (value or "UNKNOWN"),
@@ -213,7 +232,7 @@ def _mc_epilogue(req: FullReq, stem_steps, total):
 
     return {
         "mode": "mc", "options": opts, "answer_value": value, "matched_letter": matched,
-        "committed_widx": committed["widx"] if committed else None,
+        "committed_widx": None,
         "steps": stem_steps + option_steps, "total_words": total, "stem_words": total,
     }
 
