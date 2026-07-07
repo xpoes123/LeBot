@@ -88,6 +88,19 @@ def _post(channel_id, msg):
         print("post err:", e, flush=True)
 
 
+def _answer(client, text, category, history):
+    """The ANSWERER: slow but accurate (Sonnet + calculator + verbose). Run once in the
+    ~2s buzz->answer window to work out the real answer after the buzzer commits."""
+    try:
+        d = client.post(f"{LEBOT_URL}/analyze", json={
+            "prefix": text, "category": category,
+            "total_words": max(40, len(text.split()) * 2),
+            "history": history, "fast": False}, timeout=15).json()
+        return d.get("guess", "?")
+    except Exception:
+        return "?"
+
+
 class Listener:
     """Captures one audio source, transcribes, anticipates, buzzes — until stopped."""
     def __init__(self):
@@ -130,7 +143,7 @@ class Listener:
 
         client = httpx.Client(timeout=20)
         history, last_words, stale, buzzed = [], 0, 0, False
-        best_guess, best_p = "", 0.0
+        last_text = ""
         SPEECH = 0.004
         while not self._stop.is_set():
             time.sleep(0.8)
@@ -142,28 +155,27 @@ class Listener:
             grew = False
             if _rms(audio) > SPEECH:
                 gain = min(10.0, 0.06 / max(_rms(audio), 0.004))
-                t0 = time.time()
                 text = _transcribe((audio * gain).astype(np.float32))
-                t_stt = time.time() - t0
                 nwords = len(text.split())
                 if text and nwords > last_words:
-                    grew, last_words = True, nwords
-                    t1 = time.time()
+                    grew, last_words, last_text = True, nwords, text
+                    # BUZZER (Haiku, fast): P = confidence our system can answer if we
+                    # commit now — NOT whether Haiku already has it right.
                     try:
                         d = client.post(f"{LEBOT_URL}/analyze", json={
-                            "prefix": text, "category": category,
-                            "total_words": max(40, nwords * 2), "history": history, "fast": True}).json()
+                            "prefix": text, "category": category, "total_words": max(40, nwords * 2),
+                            "history": history, "fast": True}).json()
                     except Exception:
                         d = {}
-                    print(f"[timing buf={len(audio)/RATE:.0f}s stt={t_stt:.1f}s analyze={time.time()-t1:.1f}s]", flush=True)
                     history.append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
-                    guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
-                    if guess and guess.upper() != "UNKNOWN":
-                        best_guess, best_p = guess, p
-                    print(f"[{nwords:2}w P={p:.2f} → {guess[:22]}] …{text[-45:]}", flush=True)
+                    p = d.get("p_buzz", 0)
+                    print(f"[{nwords:2}w P={p:.2f} → {d.get('guess','?')[:22]}] …{text[-45:]}", flush=True)
                     if d.get("buzzes") and not buzzed:
                         buzzed = True
-                        _post(channel_id, f"⚡ **BUZZ** — **{guess}**  (P={p}, {nwords} words)\n> {text}")
+                        # ANSWERER (Sonnet): work out the real answer in the buzz window
+                        _post(channel_id, f"⚡ **BUZZ** (word {nwords}, confidence {p:.0%}) — working out the answer…")
+                        ans = _answer(client, text, category, history)
+                        _post(channel_id, f"🧠 **{ans}**\n> {text}")
 
             # end of question = transcript stopped growing for ~5s (volume-independent)
             if grew:
@@ -171,13 +183,13 @@ class Listener:
             elif last_words > 0:
                 stale += 1
                 if stale >= 5:
-                    if not buzzed and best_guess:
-                        _post(channel_id, f"🔔 **(end of question) best guess** — **{best_guess}**  (P={best_p})")
+                    if not buzzed:   # never confident enough; still answer (fully-read = free)
+                        ans = _answer(client, last_text, category, history)
+                        _post(channel_id, f"🔔 **(end of question)** — **{ans}**\n> {last_text}")
                     print("— reset —", flush=True)
                     with lock:
                         buf.clear()
-                    history, last_words, stale, buzzed = [], 0, 0, False
-                    best_guess, best_p = "", 0.0
+                    history, last_words, stale, buzzed, last_text = [], 0, 0, False, ""
             if len(audio) > RATE * 45:
                 with lock:
                     buf.clear()
