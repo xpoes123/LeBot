@@ -6,3 +6,4 @@ packets/
 *.pyc
 
 .cache_*.json
+botvenv/
