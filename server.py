@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
@@ -64,13 +64,21 @@ def upload_form():
     return HTMLResponse(upload.form_html())
 
 
+def _client_ip(request: Request) -> str:
+    # Only Caddy (localhost) talks to uvicorn, so its X-Forwarded-For is trustworthy.
+    xff = request.headers.get("x-forwarded-for", "")
+    return xff.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+
+
 @app.post("/upload")
 async def upload_packet(
+    request: Request,
     tournament: str = Form(...),
     file: UploadFile = File(...),
     submitter: str = Form(""),
 ):
     try:
+        upload.check_rate(_client_ip(request))  # reject floods before reading the body
         # Bound memory to the cap even if Content-Length lies (uvicorn spools the body to disk;
         # we only pull it into RAM up to MAX_BYTES). ponytail: add streaming middleware if abused.
         if file.size is not None and file.size > upload.MAX_BYTES:

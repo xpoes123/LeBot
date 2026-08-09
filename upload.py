@@ -3,9 +3,11 @@
 Kept separate from server.py so the safety-critical logic is unit-testable
 without loading the ML model. server.py adds the GET/POST /upload routes.
 """
+import collections
 import json
 import os
 import re
+import time
 import urllib.request
 from pathlib import Path
 
@@ -22,6 +24,24 @@ MAGIC = {".pdf": b"%PDF", ".docx": b"PK\x03\x04"}
 
 class UploadError(ValueError):
     """Rejected upload. The message is safe to show the submitter."""
+
+
+RATE_MAX = 30          # uploads per IP...
+RATE_WINDOW = 3600     # ...per hour — enough to submit a couple tournaments; blocks floods
+_hits: dict[str, list[float]] = collections.defaultdict(list)
+
+
+def check_rate(ip: str, now: float | None = None) -> None:
+    """Per-IP sliding window. ponytail: in-process dict, single uvicorn worker —
+    move to a shared store only if LeBot ever runs multiple workers/hosts."""
+    now = time.time() if now is None else now
+    cutoff = now - RATE_WINDOW
+    recent = [t for t in _hits[ip] if t > cutoff]
+    if len(recent) >= RATE_MAX:
+        _hits[ip] = recent
+        raise UploadError("Too many uploads from your network recently. Please try again later.")
+    recent.append(now)
+    _hits[ip] = recent  # pruned each call, so idle IPs keep at most their last-hour entries
 
 
 def safe_name(raw: str) -> str:
