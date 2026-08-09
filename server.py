@@ -9,13 +9,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from sklearn.linear_model import LogisticRegression
 
 import answerer
+import upload
 from buzzer import load_rows, CATS
 
 app = FastAPI()
@@ -56,6 +57,35 @@ def index():
 @app.get("/questions/nsba4")
 def nsba4_questions():
     return {"questions": _nsba4}
+
+
+@app.get("/upload")
+def upload_form():
+    return HTMLResponse(upload.form_html())
+
+
+@app.post("/upload")
+async def upload_packet(
+    tournament: str = Form(...),
+    file: UploadFile = File(...),
+    submitter: str = Form(""),
+):
+    try:
+        # Bound memory to the cap even if Content-Length lies (uvicorn spools the body to disk;
+        # we only pull it into RAM up to MAX_BYTES). ponytail: add streaming middleware if abused.
+        if file.size is not None and file.size > upload.MAX_BYTES:
+            raise upload.UploadError("File too large (max 30 MB).")
+        data = b""
+        while chunk := await file.read(1024 * 1024):
+            data += chunk
+            if len(data) > upload.MAX_BYTES:
+                raise upload.UploadError("File too large (max 30 MB).")
+        dest = upload.save_upload(file.filename, data, tournament)
+    except upload.UploadError as e:
+        return HTMLResponse(upload.result_html("Upload rejected", str(e)), status_code=400)
+    upload.notify_sage(dest, len(data), tournament, submitter)
+    return HTMLResponse(upload.result_html(
+        "Thanks!", f"Received “{dest.name}”. It'll be reviewed and added soon."))
 
 
 @app.post("/analyze")
