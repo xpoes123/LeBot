@@ -9,13 +9,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sklearn.linear_model import LogisticRegression
 
 import answerer
+import upload
 from buzzer import load_rows, CATS
 
 app = FastAPI()
@@ -56,6 +57,39 @@ def index():
 @app.get("/questions/nsba4")
 def nsba4_questions():
     return {"questions": _nsba4}
+
+
+def _client_ip(request: Request) -> str:
+    # Only Caddy (localhost) talks to uvicorn, so its X-Forwarded-For is trustworthy.
+    xff = request.headers.get("x-forwarded-for", "")
+    return xff.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+
+
+@app.post("/upload")
+async def upload_packet(
+    request: Request,
+    tournament: str = Form(...),
+    file: UploadFile = File(...),
+    submitter: str = Form(""),
+):
+    """JSON API for the packet-submit form on scibowl.live (cross-origin; CORS is open)."""
+    try:
+        upload.check_rate(_client_ip(request))  # reject floods before reading the body
+        # Bound memory to the cap even if Content-Length lies (uvicorn spools the body to disk;
+        # we only pull it into RAM up to MAX_BYTES). ponytail: add streaming middleware if abused.
+        if file.size is not None and file.size > upload.MAX_BYTES:
+            raise upload.UploadError("File too large (max 30 MB).")
+        data = b""
+        while chunk := await file.read(1024 * 1024):
+            data += chunk
+            if len(data) > upload.MAX_BYTES:
+                raise upload.UploadError("File too large (max 30 MB).")
+        dest = upload.save_upload(file.filename, data, tournament)
+    except upload.UploadError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    upload.notify_sage(dest, len(data), tournament, submitter)
+    return {"ok": True, "filename": dest.name,
+            "message": f"Received “{dest.name}”. It'll be reviewed and added soon."}
 
 
 @app.post("/analyze")
