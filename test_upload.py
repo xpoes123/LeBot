@@ -39,4 +39,12 @@ assert check(upload.save_upload, "x.pdf", b"%PDF" + b"0" * (upload.MAX_BYTES), "
 d2 = upload.save_upload("AVES DE1.pdf", PDF, "AVES 2025")
 assert d2 != dest and d2.exists()
 
+# rate limit: RATE_MAX in-window succeed, the next is rejected; a different IP is unaffected
+now = 1000.0
+for _ in range(upload.RATE_MAX):
+    assert upload.check_rate("1.2.3.4", now=now) is None
+assert check(upload.check_rate, "1.2.3.4", now=now)          # over the cap
+assert upload.check_rate("5.6.7.8", now=now) is None          # other IP independent
+assert upload.check_rate("1.2.3.4", now=now + upload.RATE_WINDOW + 1) is None  # window slid
+
 print("ok")

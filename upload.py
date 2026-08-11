@@ -3,9 +3,11 @@
 Kept separate from server.py so the safety-critical logic is unit-testable
 without loading the ML model. server.py adds the GET/POST /upload routes.
 """
+import collections
 import json
 import os
 import re
+import time
 import urllib.request
 from pathlib import Path
 
@@ -22,6 +24,24 @@ MAGIC = {".pdf": b"%PDF", ".docx": b"PK\x03\x04"}
 
 class UploadError(ValueError):
     """Rejected upload. The message is safe to show the submitter."""
+
+
+RATE_MAX = 30          # uploads per IP...
+RATE_WINDOW = 3600     # ...per hour — enough to submit a couple tournaments; blocks floods
+_hits: dict[str, list[float]] = collections.defaultdict(list)
+
+
+def check_rate(ip: str, now: float | None = None) -> None:
+    """Per-IP sliding window. ponytail: in-process dict, single uvicorn worker —
+    move to a shared store only if LeBot ever runs multiple workers/hosts."""
+    now = time.time() if now is None else now
+    cutoff = now - RATE_WINDOW
+    recent = [t for t in _hits[ip] if t > cutoff]
+    if len(recent) >= RATE_MAX:
+        _hits[ip] = recent
+        raise UploadError("Too many uploads from your network recently. Please try again later.")
+    recent.append(now)
+    _hits[ip] = recent  # pruned each call, so idle IPs keep at most their last-hour entries
 
 
 def safe_name(raw: str) -> str:
@@ -89,45 +109,3 @@ def notify_sage(dest: Path, size: int, tournament: str, submitter: str) -> None:
         urllib.request.urlopen(req, timeout=10)
     except Exception:
         pass  # ponytail: best-effort — a Sage hiccup must never lose an already-saved file
-
-
-# ── HTML (inline; the whole upload UI is two small pages) ──────────────────────
-_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} — LeBot packets</title>
-<style>
- body{{font:16px/1.5 system-ui,sans-serif;background:#1a1b26;color:#c0caf5;
-   margin:0;display:grid;place-items:center;min-height:100vh;padding:24px;box-sizing:border-box}}
- .card{{background:#24283b;border:1px solid #414868;border-radius:12px;padding:28px;max-width:460px;width:100%}}
- h1{{margin:0 0 4px;font-size:22px;color:#7aa2f7}} p.sub{{margin:0 0 20px;color:#9aa5ce;font-size:14px}}
- label{{display:block;margin:14px 0 4px;font-size:14px;color:#9aa5ce}}
- input[type=text],input[type=file]{{width:100%;box-sizing:border-box;background:#1a1b26;
-   border:1px solid #414868;border-radius:8px;color:#c0caf5;padding:10px;font-size:15px}}
- button{{margin-top:20px;width:100%;background:#7aa2f7;color:#1a1b26;border:0;border-radius:8px;
-   padding:12px;font-size:16px;font-weight:600;cursor:pointer}}
- button:hover{{background:#89b4fa}} .note{{margin-top:16px;font-size:13px;color:#565f89}}
- a{{color:#7aa2f7}}
-</style></head><body><div class="card">{body}</div></body></html>"""
-
-_FORM_BODY = """<h1>Submit a packet</h1>
-<p class="sub">PDF or DOCX, up to 30&nbsp;MB. Files are reviewed before they go live.</p>
-<form method="post" action="/upload" enctype="multipart/form-data">
- <label for="tournament">Tournament name <span style="color:#f7768e">*</span></label>
- <input type="text" id="tournament" name="tournament" required placeholder="e.g. AVES 2025">
- <label for="submitter">Your name (optional)</label>
- <input type="text" id="submitter" name="submitter" placeholder="so we can credit you">
- <label for="file">Packet file <span style="color:#f7768e">*</span></label>
- <input type="file" id="file" name="file" accept=".pdf,.docx" required>
- <button type="submit">Upload</button>
-</form>
-<p class="note">Only .pdf and .docx are accepted.</p>"""
-
-
-def form_html() -> str:
-    return _PAGE.format(title="Submit a packet", body=_FORM_BODY)
-
-
-def result_html(heading: str, message: str) -> str:
-    body = (f'<h1>{heading}</h1><p class="sub">{message}</p>'
-            f'<p class="note"><a href="/upload">← Upload another</a></p>')
-    return _PAGE.format(title=heading, body=body)
