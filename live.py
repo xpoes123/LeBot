@@ -35,7 +35,7 @@ DG_URL = ("wss://api.deepgram.com/v1/listen?model=nova-2&encoding=linear16"
 _lock = threading.Lock()
 _buf = bytearray()
 state = {"running": False, "category": "OTHER", "gen": 0, "transcript": "", "thinking": "",
-         "answering": False, "answer": None, "reasoning": "", "mode": "", "err": ""}
+         "answering": False, "answer": None, "reasoning": "", "mode": "", "err": "", "refining": False}
 
 
 def _capture():
@@ -67,30 +67,37 @@ async def _think(client, text, my_gen):
             state["thinking"] = g
 
 
-async def _answer(client, full, my_gen):
-    """Send the complete question to the full-accuracy path; show answer + explanation."""
-    if not full.strip():
-        with _lock:
-            state["answering"] = False
-        return
-    try:
-        d = (await client.post(f"{LEBOT_URL}/analyze", json={
-            "prefix": full, "category": state["category"], "fast": False,
-            "total_words": len(full.split()), "history": []})).json()
-    except Exception as e:
-        with _lock:
-            state.update(answering=False, err=f"answer: {str(e)[:80]}")
-        return
-    with _lock:
-        if state["gen"] != my_gen:        # a new question already started — discard
-            return
-        state.update(answer=d.get("guess", "?"), reasoning=d.get("reasoning", ""),
-                     mode=d.get("mode", ""), answering=False)
+async def _full_call(client, text, cat):
+    d = (await client.post(f"{LEBOT_URL}/analyze", json={
+        "prefix": text, "category": cat, "fast": False,
+        "total_words": len(text.split()), "history": []})).json()
+    return d
+
+
+PRECOMP_MIN = 12      # don't full-solve until the question is clearly under way
+PRECOMP_STEP = 6      # words of new speech between rolling full-accuracy solves
+END_TIMEOUT = 8.0     # hard cap on the final solve; fall back to best-so-far
 
 
 async def _session(ws, client):
-    """One question: stream mic PCM up, keep the clean transcript, answer it on End."""
+    """One question: stream mic PCM up, keep the clean transcript, and roll a full-accuracy
+    solve on the growing text so the answer is ready the instant you press End."""
     my_gen = state["gen"]
+    # cache of the latest full-accuracy solve, so End is usually instant
+    pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
+    full_inflight = set()
+
+    async def precompute(text, words):
+        try:
+            d = await _full_call(client, text, state["category"])
+        except Exception:
+            d = None
+        if os.environ.get("LIVE_DEBUG"):
+            print(f"  [precomp {words}w → {d.get('guess') if d else 'ERR'}]", flush=True)
+        if d and state["gen"] == my_gen and words > pre["words"]:
+            pre.update(words=words, answer=d.get("guess", "?"),
+                       reasoning=d.get("reasoning", ""), mode=d.get("mode", ""))
+        full_inflight.discard(1)
 
     async def send():
         while state["running"] and state["gen"] == my_gen:
@@ -103,7 +110,7 @@ async def _session(ws, client):
         await ws.send(json.dumps({"type": "CloseStream"}))
 
     sender = asyncio.create_task(send())
-    finals, last_words, inflight = [], 0, set()
+    finals, last_think, last_full, think_inflight = [], 0, 0, set()
     async for raw in ws:                  # runs until Deepgram closes the ws (after End)
         data = json.loads(raw)
         if data.get("type") != "Results":
@@ -116,16 +123,63 @@ async def _session(ws, client):
         with _lock:
             state["transcript"] = full
         nwords = len(full.split())
-        if state["running"] and nwords > last_words and not inflight:   # live tentative guess
-            last_words = nwords
-            inflight.add(1)
+        if state["running"] and nwords > last_think and not think_inflight:   # live lean
+            last_think = nwords
+            think_inflight.add(1)
             t = asyncio.create_task(_think(client, full, my_gen))
-            t.add_done_callback(lambda _: inflight.discard(1))
+            t.add_done_callback(lambda _: think_inflight.discard(1))
+        if (state["running"] and nwords >= PRECOMP_MIN                        # roll a full solve
+                and nwords >= last_full + PRECOMP_STEP and not full_inflight):
+            last_full = nwords
+            full_inflight.add(1)
+            asyncio.create_task(precompute(full, nwords))
         if state["gen"] != my_gen:         # a new question started without a clean End
             break
     await sender
-    if state["gen"] == my_gen:             # question ended — answer the full transcript
-        await _answer(client, state["transcript"], my_gen)
+    if state["gen"] != my_gen:
+        return
+    # End: use the rolled solve if it already covers ~all of the question; else solve now (capped)
+    final = state["transcript"]
+    fw = len(final.split())
+    # Instant path: a confident rolled solve covering ~most of the question (the last few
+    # words rarely change a recall answer). Show it now, then silently re-solve the complete
+    # text in the background and correct if it actually differs — speed without losing accuracy.
+    have_pre = (pre["answer"] and pre["answer"].upper() != "UNKNOWN"
+                and pre["words"] >= max(PRECOMP_MIN, int(0.6 * fw)))
+    if os.environ.get("LIVE_DEBUG"):
+        print(f"  [END fw={fw} pre={pre['words']}w/{pre['answer']} have_pre={have_pre}]", flush=True)
+    if have_pre:
+        # Show the rolled answer instantly, then re-solve the complete text and firm it up.
+        with _lock:
+            if state["gen"] == my_gen:
+                state.update(answer=pre["answer"], reasoning=pre["reasoning"],
+                             mode=pre["mode"], answering=False, refining=True)
+
+        async def verify():
+            try:
+                d = await _full_call(client, final, state["category"])
+            except Exception:
+                d = None
+            g = d.get("guess", "") if d else ""
+            with _lock:
+                if state["gen"] == my_gen:
+                    if g and g.upper() != "UNKNOWN":
+                        state.update(answer=g, reasoning=d.get("reasoning", ""), mode=d.get("mode", ""))
+                    state["refining"] = False
+        asyncio.create_task(verify())
+        return
+
+    try:
+        d = await asyncio.wait_for(_full_call(client, final, state["category"]), END_TIMEOUT)
+    except Exception:
+        d = ({"guess": pre["answer"], "reasoning": pre["reasoning"] + " (from just before the end)",
+              "mode": pre["mode"]} if pre["answer"]
+             else {"guess": state.get("thinking") or "?", "reasoning": "(timed out — best guess)",
+                   "mode": ""})
+    with _lock:
+        if state["gen"] == my_gen:
+            state.update(answer=d.get("guess", "?"), reasoning=d.get("reasoning", ""),
+                         mode=d.get("mode", ""), answering=False)
 
 
 async def _dg_loop():
@@ -152,7 +206,7 @@ def _start(category):
     with _lock:
         _buf.clear()
         state.update(category=category, transcript="", thinking="", answer=None, reasoning="",
-                     mode="", err="", answering=False, gen=state["gen"] + 1, running=True)
+                     mode="", err="", answering=False, refining=False, gen=state["gen"] + 1, running=True)
 
 
 def _stop():
@@ -214,7 +268,7 @@ async function tick(){
   $('err').textContent=s.err||''
   let c=$('card')
   if(s.answering){c.style.display='block';$('answer').textContent='…';$('why').textContent='';$('mode').textContent=''}
-  else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('why').textContent=s.reasoning||'';$('mode').textContent=s.mode?('mode: '+s.mode):''}
+  else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('why').textContent=s.reasoning||'';$('mode').textContent=(s.refining?'refining…':(s.mode?('mode: '+s.mode):''))}
   else if(s.running){c.style.display='none'}
 }
 setInterval(tick,400);tick()
