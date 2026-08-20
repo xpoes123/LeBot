@@ -397,8 +397,11 @@ def _list_prior_guess(ans, prefix):
 
 def _is_list_q(prefix):
     """A numbered-list (order/identify-all/rank) question — always answered by RECALL
-    as indices, never the calculator (which would return raw values or a list repr)."""
-    return bool(re.search(r"\d\)", prefix)) or any(
+    as indices, never the calculator (which would return raw values or a list repr).
+    Strip parenthesized groups first so coordinates/functions like 'A(4, 6)' or 'a(1)'
+    don't read as list markers '6)'/'1)'."""
+    stripped = re.sub(r"\([^)]*\)", " ", prefix)
+    return bool(re.search(r"\d\)", stripped)) or any(
         w in prefix.lower() for w in ("identify all", "order the", "rank the"))
 
 
@@ -460,6 +463,8 @@ def anticipate_best(prefix, category, n=3):
         return seq, "seq"
     if not _is_list_q(prefix) and any(ch.isdigit() for ch in prefix):
         v = solve(prefix, category)
+        if v is None:  # Sonnet declined/failed the setup — retry with a stronger solver
+            v = solve(prefix, category, use_opus=True)  # before falling back to a recall guess
         if v is not None:
             return v, "calc"
     ans = _vote(anticipate_sa(prefix, category, n=n))
