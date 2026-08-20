@@ -1,7 +1,7 @@
-"""LeBot local listener — captures the audio you HEAR (the reader in a Discord call)
-straight from the PipeWire monitor, transcribes on the GPU, and runs the proven
-transcript->/analyze->buzz pipeline. No Discord voice API (which is broken against
-Discord's current protocol) — just the sound coming out of your headset.
+"""LeBot local listener — no bot, no Discord. You're in a Discord call hearing the
+reader; this taps that same computer audio from the PipeWire monitor, transcribes on
+the GPU, runs the transcript->/analyze->buzz pipeline, and prints the live answer in
+this terminal. Nothing is sent anywhere.
 
 Usage:
   ./botvenv/bin/python listen.py [category]
@@ -9,7 +9,7 @@ Env:
   AUDIO_SOURCE   PipeWire source to capture (default: the default sink's monitor)
   LEBOT_URL      anticipation endpoint (default https://lebot.djiang.xyz)
 
-A ~2.5s silence gap ends the current question and resets for the next one.
+A ~6s silence gap ends the current question and resets for the next one.
 """
 import os
 import subprocess
@@ -33,18 +33,6 @@ _load_env()
 LEBOT_URL = os.environ.get("LEBOT_URL", "https://lebot.djiang.xyz")
 CATEGORY = (sys.argv[1].upper() if len(sys.argv) > 1 else "OTHER")
 RATE = 16000
-
-
-def post_discord(msg):
-    tok, ch = os.environ.get("DISCORD_TOKEN"), os.environ.get("DISCORD_CHANNEL_ID")
-    if not tok or not ch:
-        return
-    try:
-        httpx.post(f"https://discord.com/api/v10/channels/{ch}/messages",
-                   headers={"Authorization": f"Bot {tok}"},
-                   json={"content": msg[:1900]}, timeout=10)
-    except Exception as e:
-        print("discord post err:", e, flush=True)
 
 
 def _default_monitor():
@@ -151,7 +139,6 @@ def main():
                 if d.get("buzzes") and not buzzed:
                     buzzed = True
                     print(f"\n  ⚡⚡ BUZZ — {guess}  (P={p}, {nwords} words)\n", flush=True)
-                    post_discord(f"⚡ **BUZZ** — **{guess}**  (P={p}, {nwords} words heard)\n> {text}")
 
         # sustained quiet after a question -> reset for the next one (patient: ~6s so
         # natural reading pauses don't chop a question in half)
