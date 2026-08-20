@@ -264,6 +264,8 @@ def _fmt(a):
         return str(a.numerator) if a.denominator == 1 else f"{a.numerator}/{a.denominator}"
     if isinstance(a, float):
         return str(int(a)) if a == int(a) else f"{a:.4g}"
+    if isinstance(a, (tuple, list)):  # e.g. coordinates -> "(-2, 1)" not raw Fraction reprs
+        return "(" + ", ".join(_fmt(x) for x in a) + ")"
     return str(a)
 
 
@@ -282,7 +284,12 @@ def _calc(code):
                      "range": range, "len": len, "int": int, "float": float,
                      "abs": abs, "round": round, "sum": sum, "min": min, "max": max,
                      "pow": pow, "enumerate": enumerate, "list": list, "map": map,
-                     "zip": zip, "sorted": sorted, "set": set, "dict": dict, "tuple": tuple}
+                     "zip": zip, "sorted": sorted, "set": set, "dict": dict, "tuple": tuple,
+                     # string/number helpers model-written code commonly uses (e.g. base
+                     # conversion via str()/reversed(), digit tests via str(n))
+                     "str": str, "reversed": reversed, "divmod": divmod, "bool": bool,
+                     "all": all, "any": any, "filter": filter, "bin": bin, "hex": hex,
+                     "oct": oct, "chr": chr, "ord": ord, "format": format, "frozenset": frozenset}
     ns = {"__builtins__": safe_builtins}
     ns.update(_SAFE)
     exec(code, ns)
@@ -359,6 +366,13 @@ def _vote(cands):
 
 
 _NUMWORD = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+
+# spelled-out numbers/ordinals that signal a computational stem even with no digit chars
+_NUMBER_WORDS = re.compile(
+    r"\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
+    r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|"
+    r"sixty|seventy|eighty|ninety|hundred|thousand|million|billion|half|third|fourth|"
+    r"fifth|sixth|seventh|eighth|ninth|tenth|first|second|dozen)\b", re.I)
 
 
 def _parrots_stem(ans, prefix):
@@ -461,7 +475,13 @@ def anticipate_best(prefix, category, n=3):
     seq = sequences.solve_ordering(prefix)  # deterministic canonical-sequence ordering
     if seq is not None:
         return seq, "seq"
-    if not _is_list_q(prefix) and any(ch.isdigit() for ch in prefix):
+    # Try the calculator when the stem carries a number. Digits gate every category; for
+    # MATH also accept spelled-out numbers ("two x plus five", "the fifth power") — many math
+    # stems have no digit chars at all. Kept MATH-only so recall categories don't eat a solve
+    # call (and Opus retry) on every stem that merely says "three".
+    has_number = any(ch.isdigit() for ch in prefix) or (
+        category == "MATH" and bool(_NUMBER_WORDS.search(prefix)))
+    if not _is_list_q(prefix) and has_number:
         v = solve(prefix, category)
         if v is None:  # Sonnet declined/failed the setup — retry with a stronger solver
             v = solve(prefix, category, use_opus=True)  # before falling back to a recall guess
