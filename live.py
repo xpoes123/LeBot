@@ -53,7 +53,11 @@ _CATWORD = r"(biolog\w*|chem\w*|physic\w*|math\w*|energy|earth(?:\s+and)?(?:\s+s
 _MARK = re.compile(_CATWORD + r"[\s,.]+(?:and\s+)?(short answer|multiple choice)", re.I)
 # The read is over the moment the moderator/players react — SB audio rarely leaves a pause,
 # so these content cues, not silence, are the real end-of-question signal.
-_CONF = re.compile(r"that(?:'s| is) (?:in)?correct|i'?ll reread|\bincorrect\b|\binterrupt\b", re.I)
+# end-of-read cues. "interrupt" only counts as a real buzz when it looks like the moderator
+# confirming one ("Peter, interrupt?" / "Vish. Interrupt.") — not mid-sentence STT garble
+# ("...the following interrupt that..."), which was ending questions early.
+_CONF = re.compile(r"that(?:'s| is) (?:in)?correct|i'?ll reread|\bincorrect\b|"
+                   r"\w+[,.]\s+interrupt\b|\binterrupt\s*\?", re.I)
 # a multiple-choice read is done once all four option letters have gone by, in order
 _OPTS = re.compile(r"\bw\b.{0,160}\bx\b.{0,160}\by\b.{0,160}\bz\b", re.I | re.S)
 MAX_Q_WORDS = 90      # a runaway guard: no real question runs this long
