@@ -45,10 +45,16 @@ DG_URL = ("wss://api.deepgram.com/v1/listen?" + urllib.parse.urlencode(_PARAMS)
 
 _CATMAP = {"physic": "PHYSICS", "math": "MATH", "chem": "CHEMISTRY", "bio": "BIOLOGY",
            "energy": "ENERGY", "earth": "EARTH_SPACE", "space": "EARTH_SPACE"}
-_MARK = re.compile(r"\b(toss[-\s]?up|bonus)\b[\s,.]+([a-z& ]+?)[\s,.]+(short answer|multiple choice)", re.I)
+# Anchor on "<category> short answer|multiple choice" — the moderator always says it, and
+# Deepgram often mangles "toss-up"/"bonus" (heard "Possibilities of"). Everything AFTER the
+# format phrase is the question; the category word is right before it. group(1)=cat group(2)=fmt.
+_CATWORD = r"(biolog\w*|chem\w*|physic\w*|math\w*|energy|earth(?:\s+and)?(?:\s+space)?|space)"
+_MARK = re.compile(_CATWORD + r"[\s,.]+(?:and\s+)?(short answer|multiple choice)", re.I)
 # The read is over the moment the moderator/players react — SB audio rarely leaves a pause,
 # so these content cues, not silence, are the real end-of-question signal.
 _CONF = re.compile(r"that(?:'s| is) (?:in)?correct|i'?ll reread|\bincorrect\b|\binterrupt\b", re.I)
+# a multiple-choice read is done once all four option letters have gone by, in order
+_OPTS = re.compile(r"\bw\b.{0,160}\bx\b.{0,160}\by\b.{0,160}\bz\b", re.I | re.S)
 MAX_Q_WORDS = 90      # a runaway guard: no real question runs this long
 
 
@@ -223,8 +229,8 @@ async def _run(ws, client):
             joined = " ".join(finals).strip()
             m = _MARK.search(joined)
             if m or force_start:
-                qcat = _catof(m.group(2)) if m else "OTHER"
-                form = m.group(3).lower() if m else ""
+                qcat = _catof(m.group(1)) if m else "OTHER"
+                form = m.group(2).lower() if m else ""
                 after = joined[m.end():].strip() if m else ""
                 my_gen = _begin(qcat, form, after)
                 reading, finals, interim = True, ([after] if after else []), ""
@@ -247,18 +253,25 @@ async def _run(ws, client):
                 full_inflight.add(1)
                 asyncio.create_task(precompute(qtext, nwords, my_gen, state["category"]))
 
-            # End of read: SB audio rarely pauses, so the real signals are the NEXT
-            # announcement, a correct/incorrect/interrupt cue, or a runaway word cap —
-            # not just silence. Answer the text up to that point, then start the next Q.
+            # End of read, by question grammar (silence is unreliable in SB audio):
+            #  · short answer ends at the "?"
+            #  · multiple choice ends once all four options W/X/Y/Z have been read
+            #  · the next announcement, or a correct/incorrect cue, ends it too (and the
+            #    next announcement also starts that question); a word cap backstops runaways.
+            is_mc = "multiple" in state["qformat"]
             m2 = _MARK.search(joined)
             conf = _CONF.search(qtext)
             end_q, restart = None, None
             if m2:
                 end_q = joined[:m2.start()].strip()
-                restart = (_catof(m2.group(2)), m2.group(3).lower(), joined[m2.end():].strip())
+                restart = (_catof(m2.group(1)), m2.group(2).lower(), joined[m2.end():].strip())
             elif conf:
                 end_q = qtext[:conf.start()].strip()
-            elif force_end or nwords >= MAX_Q_WORDS or (speech_final and nwords >= 6):
+            elif not is_mc and nwords >= 6 and "?" in joined:
+                end_q = joined[:joined.index("?") + 1].strip()
+            elif is_mc and _OPTS.search(joined):
+                end_q = qtext
+            elif force_end or nwords >= MAX_Q_WORDS:
                 end_q = qtext
 
             if end_q is not None:
