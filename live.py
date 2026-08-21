@@ -45,7 +45,11 @@ DG_URL = ("wss://api.deepgram.com/v1/listen?" + urllib.parse.urlencode(_PARAMS)
 
 _CATMAP = {"physic": "PHYSICS", "math": "MATH", "chem": "CHEMISTRY", "bio": "BIOLOGY",
            "energy": "ENERGY", "earth": "EARTH_SPACE", "space": "EARTH_SPACE"}
-_MARK = re.compile(r"\b(toss-?up|bonus)\b[\s,]+([a-z ]+?)[\s,]+(short answer|multiple choice)", re.I)
+_MARK = re.compile(r"\b(toss[-\s]?up|bonus)\b[\s,.]+([a-z& ]+?)[\s,.]+(short answer|multiple choice)", re.I)
+# The read is over the moment the moderator/players react — SB audio rarely leaves a pause,
+# so these content cues, not silence, are the real end-of-question signal.
+_CONF = re.compile(r"that(?:'s| is) (?:in)?correct|i'?ll reread|\bincorrect\b|\binterrupt\b", re.I)
+MAX_Q_WORDS = 90      # a runaway guard: no real question runs this long
 
 
 def _catof(s):
@@ -61,7 +65,8 @@ _buf = bytearray()
 state = {"mode": "waiting",      # waiting | reading | answering
          "category": "", "qformat": "", "transcript": "", "thinking": "",
          "answer": None, "reasoning": "", "resmode": "", "steps": [], "refining": False,
-         "err": "", "gen": 0, "force_start": False, "force_end": False, "cat_override": ""}
+         "err": "", "gen": 0, "force_start": False, "force_end": False, "force_clear": False,
+         "cat_override": ""}
 
 PRECOMP_MIN = 8       # start trying an answer once the question is a bit under way
 PRECOMP_STEP = 5      # words of new speech between answer attempts (calm, not every word)
@@ -203,9 +208,16 @@ async def _run(ws, client):
 
         force_start = state["force_start"]
         force_end = state["force_end"]
-        if force_start:
+        force_clear = state["force_clear"]
+        if force_start or force_end or force_clear:
             with _lock:
-                state["force_start"] = False
+                state["force_start"] = state["force_end"] = state["force_clear"] = False
+
+        if force_clear:                       # manual: drop the current read, back to listening
+            reset_reading()
+            with _lock:
+                state.update(mode="waiting", transcript="", thinking="", steps=[])
+            continue
 
         if not reading:
             joined = " ".join(finals).strip()
@@ -219,7 +231,8 @@ async def _run(ws, client):
                 last_think, last_full = 0, 0
                 pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
         else:
-            qtext = (" ".join(finals) + " " + interim).strip()
+            joined = " ".join(finals)
+            qtext = (joined + " " + interim).strip()
             with _lock:
                 state["transcript"] = qtext
             nwords = len(qtext.split())
@@ -233,13 +246,34 @@ async def _run(ws, client):
                 last_full = nwords
                 full_inflight.add(1)
                 asyncio.create_task(precompute(qtext, nwords, my_gen, state["category"]))
-            # end on a pause after enough of a question (completed read OR buzz interrupt)
-            if ((speech_final and nwords >= 6) or force_end):
-                if force_end:
+
+            # End of read: SB audio rarely pauses, so the real signals are the NEXT
+            # announcement, a correct/incorrect/interrupt cue, or a runaway word cap —
+            # not just silence. Answer the text up to that point, then start the next Q.
+            m2 = _MARK.search(joined)
+            conf = _CONF.search(qtext)
+            end_q, restart = None, None
+            if m2:
+                end_q = joined[:m2.start()].strip()
+                restart = (_catof(m2.group(2)), m2.group(3).lower(), joined[m2.end():].strip())
+            elif conf:
+                end_q = qtext[:conf.start()].strip()
+            elif force_end or nwords >= MAX_Q_WORDS or (speech_final and nwords >= 6):
+                end_q = qtext
+
+            if end_q is not None:
+                if len(end_q.split()) >= 3:
+                    await answer_now(end_q, my_gen, state["category"])
+                else:
                     with _lock:
-                        state["force_end"] = False
-                await answer_now(qtext, my_gen, state["category"])
+                        state["mode"] = "waiting"
                 reset_reading()
+                if restart:
+                    cat2, form2, after2 = restart
+                    my_gen = _begin(cat2, form2, after2)
+                    reading, finals, interim = True, ([after2] if after2 else []), ""
+                    last_think, last_full = 0, 0
+                    pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
 
     await sender
 
@@ -293,6 +327,7 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
 <div>
   <button id=start onclick=fstart()>▶ Force start</button>
   <button id=stop onclick=fstop()>■ Answer now</button>
+  <button id=clear onclick=fclear()>✕ Clear</button>
   <label style="color:#565f89;font-size:13px;margin-left:8px">category
   <select id=cat onchange=setcat()>
     <option value="">auto</option>__CATS__
@@ -317,6 +352,7 @@ function $(s){return document.getElementById(s)}
 function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function fstart(){await fetch('/start',{method:'POST'})}
 async function fstop(){await fetch('/stop',{method:'POST'})}
+async function fclear(){await fetch('/clear',{method:'POST'})}
 async function setcat(){await fetch('/cat?c='+$('cat').value,{method:'POST'})}
 async function tick(){
   let s;try{s=await (await fetch('/state')).json()}catch(e){return}
@@ -371,6 +407,10 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/stop":
             with _lock:
                 state["force_end"] = True
+            self._send(200, "{}", "application/json")
+        elif self.path == "/clear":
+            with _lock:
+                state["force_clear"] = True
             self._send(200, "{}", "application/json")
         elif self.path.startswith("/cat"):
             c = self.path.split("c=", 1)[1].split("&")[0].upper() if "c=" in self.path else ""
