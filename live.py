@@ -56,7 +56,7 @@ _MARK = re.compile(_CATWORD + r"[\s,.]+(?:and\s+)?(short answer|multiple choice)
 # end-of-read cues. "interrupt" only counts as a real buzz when it looks like the moderator
 # confirming one ("Peter, interrupt?" / "Vish. Interrupt.") — not mid-sentence STT garble
 # ("...the following interrupt that..."), which was ending questions early.
-_CONF = re.compile(r"that(?:'s| is) (?:in)?correct|i'?ll reread|\bincorrect\b|"
+_CONF = re.compile(r"that(?:'s| is) (?:in)?correct|i'?ll reread|"
                    r"\w+[,.]\s+interrupt\b|\binterrupt\s*\?", re.I)
 # a multiple-choice read is done once all four option letters have gone by, in order
 _OPTS = re.compile(r"\bw\b.{0,160}\bx\b.{0,160}\by\b.{0,160}\bz\b", re.I | re.S)
@@ -77,7 +77,15 @@ state = {"mode": "waiting",      # waiting | reading | answering
          "category": "", "qformat": "", "transcript": "", "thinking": "",
          "answer": None, "reasoning": "", "resmode": "", "steps": [], "refining": False,
          "err": "", "gen": 0, "force_start": False, "force_end": False, "force_clear": False,
-         "cat_override": ""}
+         "cat_override": "", "log": []}
+
+
+def _log_locked(q, ans, why, mode, cat):
+    """Append a finished question to the round log (caller holds _lock). Skip abstentions."""
+    if not ans or ans.upper() == "UNKNOWN":
+        return
+    state["log"].insert(0, {"q": q, "answer": ans, "why": why, "mode": mode, "cat": cat})
+    del state["log"][40:]
 
 PRECOMP_MIN = 8       # start trying an answer once the question is a bit under way
 PRECOMP_STEP = 5      # words of new speech between answer attempts (calm, not every word)
@@ -188,6 +196,8 @@ async def _run(ws, client):
                             state.update(answer=g, reasoning=d.get("reasoning", ""),
                                          resmode=d.get("mode", ""))
                         state["refining"] = False
+                        _log_locked(qtext, state["answer"], state["reasoning"],
+                                    state["resmode"], cat)
             asyncio.create_task(verify())
             return
         try:
@@ -212,6 +222,8 @@ async def _run(ws, client):
             if state["gen"] == gen:
                 state.update(answer=d.get("guess", "?"), reasoning=d.get("reasoning", ""),
                              resmode=d.get("mode", ""), refining=False, mode="waiting")
+                _log_locked(qtext, d.get("guess", ""), d.get("reasoning", ""),
+                            d.get("mode", ""), cat)
 
     async for raw in ws:
         data = json.loads(raw)
@@ -351,6 +363,10 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
 .answer{font-size:30px;color:#9ece6a;font-weight:700;margin:4px 0 10px}
 .why{color:#c0caf5;line-height:1.6}.mode{color:#565f89;font-size:12px;margin-top:8px}
 .err{color:#f7768e;font-size:13px;margin-top:8px}
+.logh{color:#7aa2f7;font-size:13px;text-transform:uppercase;letter-spacing:.05em;margin:24px 0 6px;border-top:1px solid #2f334d;padding-top:14px}
+.le{background:#1f2335;border:1px solid #2f334d;border-radius:9px;padding:12px 14px;margin:8px 0}
+.leh{font-size:12px;color:#565f89}.lea{color:#9ece6a;font-weight:700;font-size:17px;margin:2px 0}
+.leq{color:#9aa3b2;font-size:13px;margin:4px 0}.lew{color:#a9b1d6;font-size:13px;line-height:1.5}
 </style>
 <h1>LeBot — live answerer</h1>
 <div class=sub>Listening. It starts itself when it hears "toss-up … short answer", answers when the reader pauses. Buttons are a manual override.</div>
@@ -377,6 +393,8 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
   <div class=mode id=mode></div>
 </div>
 <div class=err id=err></div>
+<div class=logh id=logh style=display:none>Answered this round</div>
+<div id=log></div>
 <script>
 function $(s){return document.getElementById(s)}
 function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -402,6 +420,12 @@ async function tick(){
   if(answering){c.style.display='block';$('answer').textContent='…';$('why').textContent='';$('mode').textContent=''}
   else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('why').textContent=s.reasoning||'';$('mode').textContent=(s.refining?'refining…':(s.resmode?('mode: '+s.resmode):''))}
   else{c.style.display='none'}
+  let lg=s.log||[]
+  $('logh').style.display=lg.length?'block':'none'
+  $('log').innerHTML=lg.map(e=>'<div class=le><div class=leh>'+esc(e.cat)+(e.mode?(' · '+esc(e.mode)):'')+'</div>'
+    +'<div class=lea>'+esc(e.answer)+'</div>'
+    +'<div class=leq>'+esc(e.q)+'</div>'
+    +(e.why?'<div class=lew>'+esc(e.why)+'</div>':'')+'</div>').join('')
 }
 setInterval(tick,400);tick()
 </script>"""
