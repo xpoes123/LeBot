@@ -46,7 +46,7 @@ def _mc_letter(value, prefix):
         return value
     opts = {}
     for L, t in _OPT_RE.findall(prefix):
-        opts.setdefault(L.upper(), t.strip())
+        opts[L.upper()] = t.strip()  # last wins: options are at the end, past any stem variables
     vnums = re.findall(r"-?\d+\.?\d*", value)
     if len(opts) < 4 or not vnums:
         return value
