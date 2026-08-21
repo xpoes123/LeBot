@@ -15,8 +15,10 @@ import asyncio
 import json
 import os
 import re
+import signal
 import subprocess
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -475,9 +477,38 @@ class H(BaseHTTPRequestHandler):
             self._send(404, "no")
 
 
+def _free_port(port):
+    """Kill any process (a stale live.py) still holding our port, so a relaunch always works.
+    ss only reports pids for this user's own sockets, so we won't touch anything else."""
+    try:
+        out = subprocess.run(["ss", "-ltnpH", f"sport = :{port}"],
+                             capture_output=True, text=True, timeout=3).stdout
+    except Exception:
+        out = ""
+    for pid in {int(p) for p in re.findall(r"pid=(\d+)", out)}:
+        if pid != os.getpid():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
 def main():
     print(f"capture source: {SOURCE}", flush=True)
     print("Deepgram key: " + ("set" if DG_KEY else "MISSING (add DEEPGRAM_API_KEY to .env)"), flush=True)
+    srv = None
+    for attempt in range(6):
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+            break
+        except OSError:
+            if attempt == 0:
+                print(f"port {PORT} busy — clearing a stale instance…", flush=True)
+            _free_port(PORT)
+            time.sleep(0.5)
+    if srv is None:
+        print(f"could not bind {PORT}. Run:  fuser -k {PORT}/tcp", flush=True)
+        return
     threading.Thread(target=_capture, daemon=True).start()
     threading.Thread(target=lambda: asyncio.run(_stream()), daemon=True).start()
     print(f"open http://localhost:{PORT}", flush=True)
@@ -487,7 +518,7 @@ def main():
             threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
         except Exception:
             pass
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    srv.serve_forever()
 
 
 if __name__ == "__main__":
