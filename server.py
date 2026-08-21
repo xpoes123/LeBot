@@ -33,6 +33,30 @@ def _norm(s):
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (s or "").lower())).strip()
 
 
+_OPT_RE = re.compile(r"\b([WXYZ])[\s,.:)]+(.+?)(?=\s+[WXYZ][\s,.:)]|$)", re.I | re.S)
+
+
+def _mc_letter(value, prefix):
+    """Math multiple-choice: the calculator returns a bare value ('28'), but the answer
+    should be the option LETTER. If the stem carries four lettered options and value's
+    number(s) match one, return 'LETTER (value)'; otherwise return value unchanged."""
+    # only remap a BARE numeric answer ('28', '47/48') — never one that already carries a
+    # letter, units, or a direction ('X, 2 amperes in'), which is already option-shaped.
+    if not value or not re.fullmatch(r"[\d/.,\-\s]+", value.strip()):
+        return value
+    opts = {}
+    for L, t in _OPT_RE.findall(prefix):
+        opts.setdefault(L.upper(), t.strip())
+    vnums = re.findall(r"-?\d+\.?\d*", value)
+    if len(opts) < 4 or not vnums:
+        return value
+    for L in "WXYZ":
+        onums = re.findall(r"-?\d+\.?\d*", opts.get(L, ""))
+        if onums and set(vnums) <= set(onums):
+            return f"{L} ({value})"
+    return value
+
+
 class _Step(BaseModel):
     guess: str
     mode: str
@@ -96,6 +120,7 @@ async def upload_packet(
 def analyze(req: AnalyzeReq):
     if req.fast:  # low-latency live path: single Haiku anticipation, no verbose/calc
         guess, mode = answerer.anticipate_fast(req.prefix, req.category, n=3)
+        guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, guess)
         return {"guess": guess, "reasoning": "", **buzz}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
@@ -107,7 +132,7 @@ def analyze(req: AnalyzeReq):
         reasoning, sonnet_guess = f_verbose.result()
 
     if mode in ("calc", "seq"):
-        guess = haiku_guess
+        guess = _mc_letter(haiku_guess, req.prefix)  # map a computed value to its MC letter
     elif sonnet_guess and sonnet_guess.upper() != "UNKNOWN":
         guess = sonnet_guess
     else:

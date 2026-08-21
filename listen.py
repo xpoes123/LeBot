@@ -1,7 +1,7 @@
-"""LeBot local listener — captures the audio you HEAR (the reader in a Discord call)
-straight from the PipeWire monitor, transcribes on the GPU, and runs the proven
-transcript->/analyze->buzz pipeline. No Discord voice API (which is broken against
-Discord's current protocol) — just the sound coming out of your headset.
+"""LeBot local listener — no bot, no Discord. You're in a Discord call hearing the
+reader; this taps that same computer audio from the PipeWire monitor, transcribes on
+the GPU, runs the transcript->/analyze->buzz pipeline, and prints the live answer in
+this terminal. Nothing is sent anywhere.
 
 Usage:
   ./botvenv/bin/python listen.py [category]
@@ -9,7 +9,7 @@ Env:
   AUDIO_SOURCE   PipeWire source to capture (default: the default sink's monitor)
   LEBOT_URL      anticipation endpoint (default https://lebot.djiang.xyz)
 
-A ~2.5s silence gap ends the current question and resets for the next one.
+A ~6s silence gap ends the current question and resets for the next one.
 """
 import os
 import subprocess
@@ -33,18 +33,6 @@ _load_env()
 LEBOT_URL = os.environ.get("LEBOT_URL", "https://lebot.djiang.xyz")
 CATEGORY = (sys.argv[1].upper() if len(sys.argv) > 1 else "OTHER")
 RATE = 16000
-
-
-def post_discord(msg):
-    tok, ch = os.environ.get("DISCORD_TOKEN"), os.environ.get("DISCORD_CHANNEL_ID")
-    if not tok or not ch:
-        return
-    try:
-        httpx.post(f"https://discord.com/api/v10/channels/{ch}/messages",
-                   headers={"Authorization": f"Bot {tok}"},
-                   json={"content": msg[:1900]}, timeout=10)
-    except Exception as e:
-        print("discord post err:", e, flush=True)
 
 
 def _default_monitor():
@@ -74,10 +62,13 @@ def _load_whisper():
         return WhisperModel("small.en", device="cpu", compute_type="int8")
 
 
-_model = _load_whisper()
+_model = None
 
 
 def _transcribe(audio):
+    global _model
+    if _model is None:                       # lazy: don't touch the GPU just to import
+        _model = _load_whisper()
     segs, _ = _model.transcribe(audio, language="en", beam_size=1, vad_filter=True)
     return " ".join(s.text for s in segs).strip()
 
@@ -114,12 +105,41 @@ def _rms(a):
     return float(np.sqrt(np.mean(a * a))) if len(a) else 0.0
 
 
+def _settle_word(traj):
+    """Given [(nwords, guess), ...], return (final_guess, settle_word, total_words):
+    the last real answer and the earliest word of the stable tail that equals it —
+    the point 'it knew before the read finished'. final is None if it never answered."""
+    total = traj[-1][0] if traj else 0
+    named_idx = [i for i, (_, g) in enumerate(traj) if g and g.upper() != "UNKNOWN"]
+    if not named_idx:
+        return None, 0, total
+    last = named_idx[-1]
+    final = traj[last][1]
+    fn = final.strip().lower()
+    settle = traj[last][0]
+    for n, g in reversed(traj[:last + 1]):   # stable run ending at the last real answer
+        if g.strip().lower() == fn:
+            settle = n
+        else:
+            break
+    return final, settle, total
+
+
+def _settle_summary(traj):
+    final, settle, total = _settle_word(traj)
+    if final is None:
+        print("  — question over: no answer —\n", flush=True)
+        return
+    pct = 100 * settle // total if total else 0
+    print(f"\n  ── FINAL: {final}   (settled at word {settle}/{total}, {pct}% in)\n", flush=True)
+
+
 def main():
     print(f"listening on: {SOURCE}\ncategory: {CATEGORY}\nplay/read a question…\n", flush=True)
     threading.Thread(target=_capture, daemon=True).start()
 
     client = httpx.Client(timeout=20)
-    history, last_words, silent_cycles, buzzed = [], 0, 0, False
+    history, traj, last_words, silent_cycles = [], [], 0, 0
 
     SPEECH, QUIET = 0.004, 0.0035   # your mic is quiet; low thresholds
     while True:
@@ -147,20 +167,17 @@ def main():
                     d = {}
                 history.append({"guess": d.get("guess", ""), "mode": d.get("mode", "recall")})
                 guess, p = d.get("guess", "?"), d.get("p_buzz", 0)
+                traj.append((nwords, guess))
                 print(f"[{nwords:2}w P={p:.2f} → {guess[:22]}] …{text[-45:]}", flush=True)
-                if d.get("buzzes") and not buzzed:
-                    buzzed = True
-                    print(f"\n  ⚡⚡ BUZZ — {guess}  (P={p}, {nwords} words)\n", flush=True)
-                    post_discord(f"⚡ **BUZZ** — **{guess}**  (P={p}, {nwords} words heard)\n> {text}")
 
-        # sustained quiet after a question -> reset for the next one (patient: ~6s so
-        # natural reading pauses don't chop a question in half)
+        # sustained quiet after a question -> summarize earliness and reset for the next
+        # (patient: ~6s so natural reading pauses don't chop a question in half)
         if tail_rms < QUIET:
             silent_cycles += 1
             if silent_cycles >= 5 and last_words > 0:
-                print("  — silence, resetting for next question —\n", flush=True)
+                _settle_summary(traj)
                 _reset()
-                history, last_words, silent_cycles, buzzed = [], 0, 0, False
+                history, traj, last_words, silent_cycles = [], [], 0, 0
         else:
             silent_cycles = 0
         if len(audio) > RATE * 40:               # cap buffer growth
