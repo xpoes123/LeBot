@@ -35,7 +35,8 @@ DG_URL = ("wss://api.deepgram.com/v1/listen?model=nova-2&encoding=linear16"
 _lock = threading.Lock()
 _buf = bytearray()
 state = {"running": False, "category": "OTHER", "gen": 0, "transcript": "", "thinking": "",
-         "answering": False, "answer": None, "reasoning": "", "mode": "", "err": "", "refining": False}
+         "answering": False, "answer": None, "reasoning": "", "mode": "", "err": "",
+         "refining": False, "steps": []}
 
 
 def _capture():
@@ -95,8 +96,12 @@ async def _session(ws, client):
         if os.environ.get("LIVE_DEBUG"):
             print(f"  [precomp {words}w → {d.get('guess') if d else 'ERR'}]", flush=True)
         if d and state["gen"] == my_gen and words > pre["words"]:
-            pre.update(words=words, answer=d.get("guess", "?"),
-                       reasoning=d.get("reasoning", ""), mode=d.get("mode", ""))
+            g, why = d.get("guess", "?"), d.get("reasoning", "")
+            pre.update(words=words, answer=g, reasoning=why, mode=d.get("mode", ""))
+            with _lock:  # record a thinking step whenever the working answer changes
+                steps = state["steps"]
+                if g and g.upper() != "UNKNOWN" and (not steps or steps[-1]["guess"] != g):
+                    steps.append({"w": words, "guess": g, "why": why})
         full_inflight.discard(1)
 
     async def send():
@@ -206,7 +211,8 @@ def _start(category):
     with _lock:
         _buf.clear()
         state.update(category=category, transcript="", thinking="", answer=None, reasoning="",
-                     mode="", err="", answering=False, refining=False, gen=state["gen"] + 1, running=True)
+                     mode="", err="", answering=False, refining=False, steps=[],
+                     gen=state["gen"] + 1, running=True)
 
 
 def _stop():
@@ -229,6 +235,12 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
 .now{background:#24283b;border:1px solid #2f334d;border-radius:10px;padding:16px;margin:16px 0}
 .q{color:#9aa3b2;font-size:14px;min-height:20px}
 .think{color:#7aa2f7;font-size:15px;margin-top:8px;min-height:20px}.think b{color:#bb9af7}
+.steps{margin-top:14px}
+.step{border-left:2px solid #2f334d;padding:6px 0 6px 12px;margin:0 0 6px}
+.step:last-child{border-left-color:#bb9af7}
+.stepw{color:#565f89;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.stepg{color:#bb9af7;font-weight:600}.stepy{color:#9aa3b2;font-size:13px;font-style:italic;margin-top:2px}
+.slabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
 .card{background:#2a2e45;border:1px solid #bb9af7;border-radius:10px;padding:18px;margin:16px 0}
 .alabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 .answer{font-size:30px;color:#9ece6a;font-weight:700;margin:4px 0 10px}
@@ -246,6 +258,8 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
   <div><span id=dot class="dot idle"></span><span id=status>idle</span></div>
   <div class=q id=q style=margin-top:8px></div>
   <div class=think id=think></div>
+  <div class=slabel id=slabel style=display:none>How it's thinking</div>
+  <div class=steps id=steps></div>
 </div>
 <div class=card id=card style=display:none>
   <div class=alabel>Answer</div>
@@ -265,6 +279,10 @@ async function tick(){
   $('status').textContent=s.running?('listening · '+s.category):(s.answering?'thinking…':'idle')
   $('q').textContent=s.transcript||''
   $('think').innerHTML=(s.running&&s.thinking)?('leaning toward <b>'+s.thinking+'</b>…'):''
+  let steps=s.steps||[]
+  $('slabel').style.display=steps.length?'block':'none'
+  $('steps').innerHTML=steps.map(st=>'<div class=step><span class=stepw>heard '+st.w+' words</span>'
+    +'<div class=stepg>'+st.guess+'</div>'+(st.why?'<div class=stepy>'+st.why+'</div>':'')+'</div>').join('')
   $('err').textContent=s.err||''
   let c=$('card')
   if(s.answering){c.style.display='block';$('answer').textContent='…';$('why').textContent='';$('mode').textContent=''}
@@ -315,6 +333,12 @@ def main():
     threading.Thread(target=_capture, daemon=True).start()
     threading.Thread(target=lambda: asyncio.run(_dg_loop()), daemon=True).start()
     print(f"open http://localhost:{PORT}", flush=True)
+    if not os.environ.get("NO_OPEN"):
+        try:
+            import webbrowser
+            threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
+        except Exception:
+            pass
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
 
 
