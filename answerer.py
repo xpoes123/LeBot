@@ -175,12 +175,25 @@ Example: "identify all 3 amino acids that are chiral: 1) Alanine, 2) Glycine, 3)
 glycine is the sole achiral amino acid, so the instant you hear glycine answer "all except \
 glycine", before item 3 is read. Only use exclusion when you are CERTAIN of the general rule.
 
-ANSWER FORM (Science Bowl scoring): give the NAME of a concept, not a description \
-("Newton's second law", not "F=ma"; canonical symbols like "c" are fine). For a person, \
-LAST NAME ONLY ("Einstein"). OMIT units unless the question demands them. Numbers in \
-exact simplest form — no scientific notation, no repeating decimals (use fractions). \
-A chemical formula is only acceptable when the compound has no isomers (use the name \
-otherwise). Keep it to the bare answer term — never a sentence."""
+CRITICAL — multiple-choice questions: some questions are multiple choice — the stem is \
+followed by four options read IN ORDER and labelled W, X, Y, Z (e.g. "W, Crab Nebula; X, \
+Ring Nebula; Y, Trifid Nebula; Z, Wild Duck Cluster"). For these you must answer with the \
+option's LETTER, given as the letter and the option name (e.g. "X (Ring Nebula)"). Work out \
+the correct option from your own knowledge — do not just pattern-match the wording. Watch \
+for NOT / EXCEPT / LEAST / INCORRECT: then the answer is the odd one out. TIMING: while the \
+options are still being read and the option that matches your answer has NOT yet appeared, \
+reply UNKNOWN (you may not have heard the right one yet); the moment you hear the matching \
+option, commit its letter. Once all four options (through Z) have been read, ALWAYS give \
+your best letter — never abstain on a fully-read multiple-choice question. If your knowledge \
+answer is not among the four options, pick the closest option.
+
+ANSWER FORM (Science Bowl scoring): for a MULTIPLE-CHOICE question the answer is the option \
+LETTER with its name in parentheses (e.g. "Y (arid)"). Otherwise give the NAME of a concept, \
+not a description ("Newton's second law", not "F=ma"; canonical symbols like "c" are fine). \
+For a person, LAST NAME ONLY ("Einstein"). OMIT units unless the question demands them. \
+Numbers in exact simplest form — no scientific notation, no repeating decimals (use \
+fractions). A chemical formula is only acceptable when the compound has no isomers (use the \
+name otherwise). Keep it to the bare answer term — never a sentence."""
 
 
 def _clean_answer(r):
