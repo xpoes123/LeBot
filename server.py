@@ -40,10 +40,14 @@ def _mc_letter(value, prefix):
     """Math multiple-choice: the calculator returns a bare value ('28'), but the answer
     should be the option LETTER. If the stem carries four lettered options and value's
     number(s) match one, return 'LETTER (value)'; otherwise return value unchanged."""
+    # only remap a BARE numeric answer ('28', '47/48') — never one that already carries a
+    # letter, units, or a direction ('X, 2 amperes in'), which is already option-shaped.
+    if not value or not re.fullmatch(r"[\d/.,\-\s]+", value.strip()):
+        return value
     opts = {}
     for L, t in _OPT_RE.findall(prefix):
         opts.setdefault(L.upper(), t.strip())
-    vnums = re.findall(r"-?\d+\.?\d*", value or "")
+    vnums = re.findall(r"-?\d+\.?\d*", value)
     if len(opts) < 4 or not vnums:
         return value
     for L in "WXYZ":
