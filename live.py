@@ -270,6 +270,7 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
 <div class=err id=err></div>
 <script>
 function $(s){return document.getElementById(s)}
+function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function start(){await fetch('/start?cat='+$('cat').value,{method:'POST'})}
 async function stop(){await fetch('/stop',{method:'POST'})}
 async function tick(){
@@ -278,11 +279,11 @@ async function tick(){
   $('dot').className='dot '+(s.running?'live':'idle')
   $('status').textContent=s.running?('listening · '+s.category):(s.answering?'thinking…':'idle')
   $('q').textContent=s.transcript||''
-  $('think').innerHTML=(s.running&&s.thinking)?('leaning toward <b>'+s.thinking+'</b>…'):''
+  $('think').innerHTML=(s.running&&s.thinking)?('leaning toward <b>'+esc(s.thinking)+'</b>…'):''
   let steps=s.steps||[]
   $('slabel').style.display=steps.length?'block':'none'
-  $('steps').innerHTML=steps.map(st=>'<div class=step><span class=stepw>heard '+st.w+' words</span>'
-    +'<div class=stepg>'+st.guess+'</div>'+(st.why?'<div class=stepy>'+st.why+'</div>':'')+'</div>').join('')
+  $('steps').innerHTML=steps.map(st=>'<div class=step><span class=stepw>heard '+(st.w|0)+' words</span>'
+    +'<div class=stepg>'+esc(st.guess)+'</div>'+(st.why?'<div class=stepy>'+esc(st.why)+'</div>':'')+'</div>').join('')
   $('err').textContent=s.err||''
   let c=$('card')
   if(s.answering){c.style.display='block';$('answer').textContent='…';$('why').textContent='';$('mode').textContent=''}
