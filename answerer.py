@@ -39,7 +39,13 @@ early-college material (modern physics, organic chemistry, multivariable calculu
 biochemistry, named theorems and phenomena). Every question has ONE specific intended \
 answer — a precise scientific term, name, law, constant, value, or named phenomenon \
 (e.g. "tetrahedral", "Avogadro constant", "allosteric inhibition"), never a vague \
-description. Reach for the specific advanced concept, not a generic one."""
+description. Reach for the specific advanced concept, not a generic one. CRUCIALLY, the \
+answer is NEVER the broad topic or field the question is plainly about: a question \
+concerning inbreeding, entropy, or natural selection does not have "inbreeding"/"entropy"/ \
+"natural selection" as its answer — that is the SUBJECT, and the answer is the specific \
+term, quantity, or name it asks FOR (here, a coefficient VALUE like 1/4). If your candidate \
+is just the topic word the stem is already about, it is wrong; if you cannot yet name the \
+specific intended answer, reply UNKNOWN rather than naming the subject area."""
 
 # The Science Bowl meta, imparted to the model. Tier 1 = how you win; Tier 2 =
 # last-resort tells used ONLY when the science is unknown.
@@ -412,7 +418,13 @@ def _list_prior_guess(ans, prefix):
     low = prefix.lower()
     if "following" not in low:                       # not a numbered-list question
         return False
-    markers = set(re.findall(r"(\d+)\)", prefix))    # '1)', '2)' items revealed so far
+    # items revealed so far — written '1)'/'1.' AND spoken 'One, ...'/'Two, ...' (read aloud,
+    # transcribed as words, not digits). Without the spoken form this guard wrongly blanked
+    # correct answers on fully-read list questions.
+    markers = set(re.findall(r"(\d+)[).]", prefix))
+    _w2n = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6"}
+    for w in re.findall(r"\b(one|two|three|four|five|six)\b\s*[,.]", low):
+        markers.add(_w2n[w])
     nums = [n for n in re.findall(r"\d+", a) if n != "0"]
     if not nums:                                     # '0' = none-of-them: need the WHOLE list
         m = re.search(r"following\s+(\w+)", low)
