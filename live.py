@@ -36,7 +36,8 @@ CATS = ["BIOLOGY", "CHEMISTRY", "PHYSICS", "EARTH_SPACE", "MATH", "ENERGY", "OTH
 # letters (Z<->D) and the announcements. keyword:intensifier boosts recognition.
 _KEYWORDS = ["W:5", "X:5", "Y:5", "Z:5", "toss-up:3", "tossup:3", "bonus:3",
              "short answer:3", "multiple choice:3", "biology:2", "chemistry:2",
-             "physics:2", "math:2", "mathematics:2", "energy:2", "earth and space:2"]
+             "physics:2", "math:2", "mathematics:2", "energy:2", "earth and space:2",
+             "interrupt:4", "correct:2", "incorrect:2"]
 _PARAMS = [("model", "nova-2"), ("encoding", "linear16"), ("sample_rate", str(RATE)),
            ("channels", "1"), ("interim_results", "true"), ("punctuate", "true"),
            ("smart_format", "true"), ("endpointing", "1400")]  # ~1.4s pause = end of read
@@ -159,7 +160,7 @@ async def _run(ws, client):
                     steps.append({"w": words, "guess": g, "why": why})
         full_inflight.discard(1)
 
-    async def answer_now(qtext, gen, cat):
+    async def answer_now(qtext, gen, cat, interrupt=False):
         with _lock:
             state["mode"] = "answering"
         fw = len(qtext.split())
@@ -188,6 +189,17 @@ async def _run(ws, client):
         try:
             d = await asyncio.wait_for(_full_call(client, qtext, cat), END_TIMEOUT)
         except Exception:
+            d = None
+        g = (d or {}).get("guess", "")
+        # On an interrupt the other team has buzzed, so commit the best answer we have rather
+        # than abstaining: prefer a fresh non-UNKNOWN solve, else the rolled solve, else the
+        # live lean. (A normal fully-read question is allowed to stay UNKNOWN — that's honest.)
+        if (not d or not g or g.upper() == "UNKNOWN") and interrupt:
+            if pre["answer"] and pre["answer"].upper() != "UNKNOWN":
+                d = {"guess": pre["answer"], "reasoning": pre["reasoning"], "mode": pre["mode"]}
+            elif state.get("thinking"):
+                d = {"guess": state["thinking"], "reasoning": "(best guess at the buzz)", "mode": ""}
+        elif not d:
             d = ({"guess": pre["answer"], "reasoning": pre["reasoning"] + " (from just before the end)",
                   "mode": pre["mode"]} if pre["answer"]
                  else {"guess": state.get("thinking") or "?", "reasoning": "(timed out — best guess)",
@@ -261,12 +273,13 @@ async def _run(ws, client):
             is_mc = "multiple" in state["qformat"]
             m2 = _MARK.search(joined)
             conf = _CONF.search(qtext)
-            end_q, restart = None, None
+            end_q, restart, interrupt = None, None, False
             if m2:
                 end_q = joined[:m2.start()].strip()
                 restart = (_catof(m2.group(1)), m2.group(2).lower(), joined[m2.end():].strip())
             elif conf:
                 end_q = qtext[:conf.start()].strip()
+                interrupt = "interrupt" in conf.group(0).lower()  # other team buzzed — commit now
             elif not is_mc and nwords >= 6 and "?" in joined:
                 end_q = joined[:joined.index("?") + 1].strip()
             elif is_mc and _OPTS.search(joined):
@@ -276,7 +289,7 @@ async def _run(ws, client):
 
             if end_q is not None:
                 if len(end_q.split()) >= 3:
-                    await answer_now(end_q, my_gen, state["category"])
+                    await answer_now(end_q, my_gen, state["category"], interrupt)
                 else:
                     with _lock:
                         state["mode"] = "waiting"
