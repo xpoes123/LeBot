@@ -75,8 +75,8 @@ async def _full_call(client, text, cat):
     return d
 
 
-PRECOMP_MIN = 12      # don't full-solve until the question is clearly under way
-PRECOMP_STEP = 6      # words of new speech between rolling full-accuracy solves
+PRECOMP_MIN = 8       # start trying an answer once the question is a bit under way
+PRECOMP_STEP = 5      # words of new speech between answer attempts (calm, not every word)
 END_TIMEOUT = 8.0     # hard cap on the final solve; fall back to best-so-far
 
 
@@ -128,7 +128,8 @@ async def _session(ws, client):
         with _lock:
             state["transcript"] = full
         nwords = len(full.split())
-        if state["running"] and nwords > last_think and not think_inflight:   # live lean
+        if (state["running"] and nwords >= last_think + PRECOMP_STEP   # live lean, ~every 5 words
+                and not think_inflight):
             last_think = nwords
             think_inflight.add(1)
             t = asyncio.create_task(_think(client, full, my_gen))
