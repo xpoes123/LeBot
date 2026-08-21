@@ -353,15 +353,15 @@ def anticipate_sa_verbose(prefix, category):
     raw = _call(
         META_SA.format(category=category),
         f"This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
-        "FIRST line, exactly: ANSWER: <a terse answer, or UNKNOWN>\n"
-        "SECOND line: one short sentence explaining your reasoning.",
-        max_tokens=120, temperature=0.7,
+        "Reason in one or two short sentences, reconsidering if your first instinct is wrong, "
+        "THEN on the FINAL line write exactly: ANSWER: <a terse answer, or UNKNOWN>. "
+        "The ANSWER line must reflect your final reasoning, not a first guess.",
+        max_tokens=250, temperature=0.7,
     )
     if "ANSWER:" in raw.upper():
-        after = raw[raw.upper().index("ANSWER:") + 7:]
-        parts = after.split("\n", 1)
-        reasoning = parts[1].strip() if len(parts) > 1 else ""
-        ans = _clean_answer(parts[0])
+        idx = raw.upper().rindex("ANSWER:")     # LAST ANSWER: = the model's final, post-reasoning answer
+        ans = _clean_answer(raw[idx + 7:].split("\n")[0])
+        reasoning = raw[:idx].strip() or raw[idx + 7:].strip()
         resolved, is_excl = resolve_exclusion(ans, prefix)
         if is_excl:  # "all except X" -> grounded exclusion, bypass the blind guard
             return reasoning, resolved
