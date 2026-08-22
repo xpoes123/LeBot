@@ -175,70 +175,38 @@ async def _run(ws, client):
         full_inflight.discard(1)
 
     async def answer_now(qtext, gen, cat, interrupt=False):
-        with _lock:
-            state["mode"] = "answering"
-        fw = len(qtext.split())
-        have_pre = (pre["answer"] and pre["answer"].upper() != "UNKNOWN"
-                    and pre["words"] >= max(PRECOMP_MIN, int(0.6 * fw)))
-        if have_pre:
-            with _lock:
-                if state["gen"] == gen:
-                    state.update(answer=pre["answer"], reasoning=pre["reasoning"],
-                                 resmode=pre["mode"], refining=True, mode="waiting")
-
-            async def verify():
-                try:
-                    d = await _full_call(client, qtext, cat)
-                except Exception:
-                    d = None
-                g = d.get("guess", "") if d else ""
-                with _lock:
-                    if state["gen"] == gen:
-                        if g and g.upper() != "UNKNOWN":
-                            state.update(answer=g, reasoning=d.get("reasoning", ""),
-                                         resmode=d.get("mode", ""))
-                        state["refining"] = False
-                        _log_locked(qtext, state["answer"], state["reasoning"],
-                                    state["resmode"], cat)
-            asyncio.create_task(verify())
-            return
-        try:
-            d = await asyncio.wait_for(_full_call(client, qtext, cat), END_TIMEOUT)
-        except Exception:
-            d = None
-        g = (d or {}).get("guess", "")
-        # On an interrupt the other team has buzzed, so commit the best answer we have rather
-        # than abstaining: prefer a fresh non-UNKNOWN solve, else the rolled solve, else the
-        # live lean. (A normal fully-read question is allowed to stay UNKNOWN — that's honest.)
-        if (not d or not g or g.upper() == "UNKNOWN") and interrupt:
-            if pre["answer"] and pre["answer"].upper() != "UNKNOWN":
-                d = {"guess": pre["answer"], "reasoning": pre["reasoning"], "mode": pre["mode"]}
-            elif state.get("thinking"):
-                d = {"guess": state["thinking"], "reasoning": "(best guess at the buzz)", "mode": ""}
-        elif not d:
-            # full solve timed out — grab a quick Haiku answer before giving up on '?'
-            fast_g = ""
-            try:
-                fd = await asyncio.wait_for(client.post(f"{LEBOT_URL}/analyze", json={
-                    "prefix": qtext, "category": cat or "OTHER", "fast": True,
-                    "total_words": len(qtext.split()), "history": []}), 6)
-                fast_g = fd.json().get("guess", "")
-            except Exception:
-                pass
-            if fast_g and fast_g.upper() != "UNKNOWN":
-                d = {"guess": fast_g, "reasoning": "(quick answer — the full solve timed out)", "mode": "fast"}
-            elif pre["answer"]:
-                d = {"guess": pre["answer"], "reasoning": pre["reasoning"] + " (from just before the end)",
-                     "mode": pre["mode"]}
-            else:
-                d = {"guess": state.get("thinking") or "UNKNOWN", "reasoning": "(the solve timed out)",
-                     "mode": ""}
+        # Show a quick answer INSTANTLY the moment the question ends — the confident rolled
+        # solve if we have one, else the live lean — then finalize with a considered solve in
+        # the background (which may correct it). This is what makes the answer appear on End
+        # instead of after a multi-second solve.
+        quick = pre["answer"] if (pre["answer"] and pre["answer"].upper() != "UNKNOWN") \
+            else state.get("thinking")
+        have_pre_reason = bool(quick and quick == pre["answer"])
         with _lock:
             if state["gen"] == gen:
-                state.update(answer=d.get("guess", "?"), reasoning=d.get("reasoning", ""),
-                             resmode=d.get("mode", ""), refining=False, mode="waiting")
-                _log_locked(qtext, d.get("guess", ""), d.get("reasoning", ""),
-                            d.get("mode", ""), cat)
+                state.update(answer=(quick or "…"),
+                             reasoning=(pre["reasoning"] if have_pre_reason else ""),
+                             resmode=(pre["mode"] if have_pre_reason else ""),
+                             refining=True, mode="waiting")
+
+        async def finalize():
+            try:
+                d = await asyncio.wait_for(_full_call(client, qtext, cat), END_TIMEOUT)
+            except Exception:
+                d = None
+            g = (d or {}).get("guess", "")
+            with _lock:
+                if state["gen"] != gen:
+                    return
+                if g and g.upper() != "UNKNOWN":
+                    state.update(answer=g, reasoning=d.get("reasoning", ""), resmode=d.get("mode", ""))
+                elif not quick:  # nothing shown and nothing found
+                    state.update(answer="UNKNOWN",
+                                 reasoning=(d.get("reasoning", "") if d else "(no answer)"), resmode="")
+                # else: keep the quick answer we already showed
+                state["refining"] = False
+                _log_locked(qtext, state["answer"], state["reasoning"], state["resmode"], cat)
+        asyncio.create_task(finalize())
 
     async for raw in ws:
         data = json.loads(raw)
