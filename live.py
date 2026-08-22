@@ -313,6 +313,10 @@ async def _run(ws, client):
                 interrupt = "interrupt" in conf.group(0).lower()  # other team buzzed — commit now
             elif not is_mc and nwords >= 6 and "?" in joined:
                 end_q = joined[:joined.index("?") + 1].strip()
+            elif not is_mc and speech_final and nwords >= 6:
+                # reader stopped after a short-answer question (Deepgram didn't punctuate a
+                # '?'); end here so we don't run on into the players'/reader's reactions
+                end_q = qtext
             elif is_mc and _OPTS.search(joined):
                 end_q = qtext
             elif force_end or nwords >= MAX_Q_WORDS:
