@@ -353,10 +353,11 @@ def anticipate_sa_verbose(prefix, category):
     raw = _call(
         META_SA.format(category=category),
         f"This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
-        "Reason in one or two short sentences, reconsidering if your first instinct is wrong, "
-        "THEN on the FINAL line write exactly: ANSWER: <a terse answer, or UNKNOWN>. "
-        "The ANSWER line must reflect your final reasoning, not a first guess.",
-        max_tokens=250, temperature=0.7,
+        "Reason BRIEFLY (evaluate each item in a few words if it's a list), reconsidering if "
+        "your first instinct is wrong, THEN on the FINAL line write exactly: "
+        "ANSWER: <a terse answer, or UNKNOWN>. Always leave room to write the ANSWER line; "
+        "it must reflect your final reasoning, not a first guess.",
+        max_tokens=450, temperature=0.7,
     )
     if "ANSWER:" in raw.upper():
         idx = raw.upper().rindex("ANSWER:")     # LAST ANSWER: = the model's final, post-reasoning answer
