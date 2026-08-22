@@ -355,6 +355,7 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
 .card{background:#2a2e45;border:1px solid #bb9af7;border-radius:10px;padding:18px;margin:16px 0}
 .alabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 .answer{font-size:30px;color:#9ece6a;font-weight:700;margin:4px 0 10px}
+.answer.prov{color:#e0af68;opacity:.7;font-style:italic}  /* provisional quick guess, still refining */
 .why{color:#c0caf5;line-height:1.6}.mode{color:#565f89;font-size:12px;margin-top:8px}
 .err{color:#f7768e;font-size:13px;margin-top:8px}
 .logh{color:#7aa2f7;font-size:13px;text-transform:uppercase;letter-spacing:.05em;margin:24px 0 6px;border-top:1px solid #2f334d;padding-top:14px}
@@ -412,7 +413,7 @@ async function tick(){
   $('err').textContent=s.err||''
   let c=$('card')
   if(answering){c.style.display='block';$('answer').textContent='…';$('why').textContent='';$('mode').textContent=''}
-  else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('why').textContent=s.reasoning||'';$('mode').textContent=(s.refining?'refining…':(s.resmode?('mode: '+s.resmode):''))}
+  else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('answer').className='answer'+(s.refining?' prov':'');$('why').textContent=s.reasoning||'';$('mode').textContent=(s.refining?'⟳ still thinking — quick guess, refining…':(s.resmode?('mode: '+s.resmode):''))}
   else{c.style.display='none'}
   let lg=s.log||[]
   $('logh').style.display=lg.length?'block':'none'
