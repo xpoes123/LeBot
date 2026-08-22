@@ -91,7 +91,7 @@ def _log_locked(q, ans, why, mode, cat):
 
 PRECOMP_MIN = 8       # start trying an answer once the question is a bit under way
 PRECOMP_STEP = 5      # words of new speech between answer attempts (calm, not every word)
-END_TIMEOUT = 8.0     # hard cap on the final solve; fall back to best-so-far
+END_TIMEOUT = 18.0    # hard cap on the final solve (Opus-retry math can be ~12s); then fall back
 
 
 def _capture():
@@ -216,10 +216,23 @@ async def _run(ws, client):
             elif state.get("thinking"):
                 d = {"guess": state["thinking"], "reasoning": "(best guess at the buzz)", "mode": ""}
         elif not d:
-            d = ({"guess": pre["answer"], "reasoning": pre["reasoning"] + " (from just before the end)",
-                  "mode": pre["mode"]} if pre["answer"]
-                 else {"guess": state.get("thinking") or "?", "reasoning": "(timed out — best guess)",
-                       "mode": ""})
+            # full solve timed out — grab a quick Haiku answer before giving up on '?'
+            fast_g = ""
+            try:
+                fd = await asyncio.wait_for(client.post(f"{LEBOT_URL}/analyze", json={
+                    "prefix": qtext, "category": cat or "OTHER", "fast": True,
+                    "total_words": len(qtext.split()), "history": []}), 6)
+                fast_g = fd.json().get("guess", "")
+            except Exception:
+                pass
+            if fast_g and fast_g.upper() != "UNKNOWN":
+                d = {"guess": fast_g, "reasoning": "(quick answer — the full solve timed out)", "mode": "fast"}
+            elif pre["answer"]:
+                d = {"guess": pre["answer"], "reasoning": pre["reasoning"] + " (from just before the end)",
+                     "mode": pre["mode"]}
+            else:
+                d = {"guess": state.get("thinking") or "UNKNOWN", "reasoning": "(the solve timed out)",
+                     "mode": ""}
         with _lock:
             if state["gen"] == gen:
                 state.update(answer=d.get("guess", "?"), reasoning=d.get("reasoning", ""),
