@@ -151,14 +151,14 @@ async def _run(ws, client):
     finals, interim = [], ""
     reading, my_gen, qcat = False, 0, "OTHER"
     last_think, last_full = 0, 0
-    answered, answered_words = False, 0   # answered this Q already? at how many words?
+    answered, answered_words, seen_opts = False, 0, 0   # answered? at how many words? #MC options seen
     think_inflight, full_inflight = set(), set()
     pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
 
     def reset_reading():
-        nonlocal reading, finals, interim, last_think, last_full, pre, answered, answered_words
+        nonlocal reading, finals, interim, last_think, last_full, pre, answered, answered_words, seen_opts
         reading, finals, interim, last_think, last_full = False, [], "", 0, 0
-        answered, answered_words = False, 0
+        answered, answered_words, seen_opts = False, 0, 0
         pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
 
     async def precompute(text, words, gen, cat):
@@ -256,13 +256,21 @@ async def _run(ws, client):
             with _lock:
                 state["transcript"] = qtext
             nwords = len(qtext.split())
-            if nwords >= last_think + THINK_STEP and not think_inflight:
+            is_mc = "multiple" in state["qformat"]
+            # For multiple choice, re-evaluate the moment each new option letter (W/X/Y/Z) is
+            # read — so it reassesses with every choice, not just on the word cadence.
+            new_option = False
+            if is_mc:
+                nopts = len(set(re.findall(r"\b[wxyz]\b", qtext.lower())))
+                if nopts > seen_opts:
+                    seen_opts, new_option = nopts, True
+            if (nwords >= last_think + THINK_STEP or new_option) and not think_inflight:
                 last_think = nwords
                 think_inflight.add(1)
                 t = asyncio.create_task(_think(client, qtext, my_gen))
                 t.add_done_callback(lambda _: think_inflight.discard(1))
-            if (nwords >= PRECOMP_MIN and nwords >= last_full + PRECOMP_STEP
-                    and not full_inflight):
+            if (((nwords >= PRECOMP_MIN and nwords >= last_full + PRECOMP_STEP)
+                 or (new_option and nwords >= PRECOMP_MIN)) and not full_inflight):
                 last_full = nwords
                 full_inflight.add(1)
                 asyncio.create_task(precompute(qtext, nwords, my_gen, state["category"]))
