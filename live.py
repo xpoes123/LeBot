@@ -282,15 +282,17 @@ async def _run(ws, client):
                 interrupt = "interrupt" in conf.group(0).lower()  # other team buzzed — commit now
             elif not is_mc and nwords >= 6 and "?" in joined:
                 end_q = joined[:joined.index("?") + 1].strip()
-            elif not is_mc and speech_final and nwords >= 6:
-                # reader stopped after a short-answer question (Deepgram didn't punctuate a
-                # '?'); end here so we don't run on into the players'/reader's reactions
+            elif (not is_mc and speech_final and nwords >= 6
+                  and joined.rstrip().endswith((".", "?", "!"))):
+                # reader paused after a COMPLETE sentence (not a mid-clause comma) — end here.
+                # The sentence-punctuation guard stops a mid-question breath cutting it off.
                 end_q = qtext
             elif is_mc and _OPTS.search(joined):
                 end_q = qtext
-            elif is_mc and speech_final and nwords >= 12:
+            elif (is_mc and speech_final and nwords >= 12
+                  and joined.rstrip().endswith((".", "?", "!"))):
                 # options can be garbled (math symbols, mis-heard Z) so _OPTS won't match; a
-                # pause after a long MC read means the reader finished — end before the chatter
+                # pause after a completed sentence means the reader finished — end before chatter
                 end_q = qtext
             elif force_end or nwords >= MAX_Q_WORDS:
                 end_q = qtext
