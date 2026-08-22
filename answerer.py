@@ -186,12 +186,14 @@ followed by four options read IN ORDER and labelled W, X, Y, Z (e.g. "W, Crab Ne
 Ring Nebula; Y, Trifid Nebula; Z, Wild Duck Cluster"). For these you must answer with the \
 option's LETTER, given as the letter and the option name (e.g. "X (Ring Nebula)"). Work out \
 the correct option from your own knowledge — do not just pattern-match the wording. Watch \
-for NOT / EXCEPT / LEAST / INCORRECT: then the answer is the odd one out. TIMING: while the \
-options are still being read and the option that matches your answer has NOT yet appeared, \
-reply UNKNOWN (you may not have heard the right one yet); the moment you hear the matching \
-option, commit its letter. Once all four options (through Z) have been read, ALWAYS give \
-your best letter — never abstain on a fully-read multiple-choice question. If your knowledge \
-answer is not among the four options, pick the closest option.
+for NOT / EXCEPT / LEAST / INCORRECT: then the answer is the odd one out. TIMING: if the STEM \
+alone already determines the answer — you know what the correct choice must SAY — give that \
+answer now as a short description/concept (e.g. "centripetal grows relative to tangential"), \
+even before the options are read; do NOT abstain just because W/X/Y/Z haven't been read yet. \
+Once you hear the options, convert to the matching option's LETTER (e.g. "X (arid)"). Reply \
+UNKNOWN only when the stem does NOT yet determine the answer. Once all four options (through \
+Z) have been read, ALWAYS give your best letter — never abstain on a fully-read question. If \
+your knowledge answer isn't among the options, pick the closest.
 
 ANSWER FORM (Science Bowl scoring): for a MULTIPLE-CHOICE question the answer is the option \
 LETTER with its name in parentheses (e.g. "Y (arid)"). Otherwise give the NAME of a concept, \
