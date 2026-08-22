@@ -151,12 +151,14 @@ async def _run(ws, client):
     finals, interim = [], ""
     reading, my_gen, qcat = False, 0, "OTHER"
     last_think, last_full = 0, 0
+    answered, answered_words = False, 0   # answered this Q already? at how many words?
     think_inflight, full_inflight = set(), set()
     pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
 
     def reset_reading():
-        nonlocal reading, finals, interim, last_think, last_full, pre
+        nonlocal reading, finals, interim, last_think, last_full, pre, answered, answered_words
         reading, finals, interim, last_think, last_full = False, [], "", 0, 0
+        answered, answered_words = False, 0
         pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
 
     async def precompute(text, words, gen, cat):
@@ -298,18 +300,25 @@ async def _run(ws, client):
                 end_q = qtext
 
             if end_q is not None:
-                if len(end_q.split()) >= 3:
+                # DEFINITIVE end = a new question announced, a correct/incorrect cue, manual
+                # end, or the runaway cap. Anything else (a pause / '?' / options) is TENTATIVE:
+                # answer now but keep transcribing, and re-answer if the reader reads more.
+                definitive = bool(m2 or conf) or force_end or nwords >= MAX_Q_WORDS
+                if len(end_q.split()) >= 3 and (not answered or nwords >= answered_words + 6):
                     await answer_now(end_q, my_gen, state["category"], interrupt)
-                else:
-                    with _lock:
-                        state["mode"] = "waiting"
-                reset_reading()
-                if restart:
-                    cat2, form2, after2 = restart
-                    my_gen = _begin(cat2, form2, after2)
-                    reading, finals, interim = True, ([after2] if after2 else []), ""
-                    last_think, last_full = 0, 0
-                    pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
+                    answered, answered_words = True, nwords
+                if definitive:
+                    if not answered:
+                        with _lock:
+                            state["mode"] = "waiting"
+                    reset_reading()
+                    if restart:
+                        cat2, form2, after2 = restart
+                        my_gen = _begin(cat2, form2, after2)
+                        reading, finals, interim = True, ([after2] if after2 else []), ""
+                        last_think, last_full, answered, answered_words = 0, 0, False, 0
+                        pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
+                # else: tentative — stay in reading mode; a continuation will re-answer above
 
     await sender
 
