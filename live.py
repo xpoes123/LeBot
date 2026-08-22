@@ -287,6 +287,10 @@ async def _run(ws, client):
                 end_q = qtext
             elif is_mc and _OPTS.search(joined):
                 end_q = qtext
+            elif is_mc and speech_final and nwords >= 12:
+                # options can be garbled (math symbols, mis-heard Z) so _OPTS won't match; a
+                # pause after a long MC read means the reader finished — end before the chatter
+                end_q = qtext
             elif force_end or nwords >= MAX_Q_WORDS:
                 end_q = qtext
 

@@ -144,11 +144,14 @@ def analyze(req: AnalyzeReq):
 
 
 def _reason_text(mode, reasoning):
-    if mode == "recall":
-        return reasoning
+    # For calc/seq, prefer the verbose model's actual explanation (computed in parallel) over
+    # a canned line — it walks through the calculation. Fall back to the canned text only if
+    # the verbose call produced nothing.
     if mode == "seq":
-        return "Solved deterministically from a known canonical ordering (no LLM)."
-    return "Computed via Python sandbox."
+        return reasoning or "Solved deterministically from a known canonical ordering."
+    if mode == "calc":
+        return reasoning or "Computed via Python sandbox."
+    return reasoning
 
 
 def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
