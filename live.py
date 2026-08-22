@@ -42,7 +42,7 @@ _KEYWORDS = ["W:5", "X:5", "Y:5", "Z:5", "toss-up:3", "tossup:3", "bonus:3",
              "interrupt:4", "correct:2", "incorrect:2"]
 _PARAMS = [("model", "nova-2"), ("encoding", "linear16"), ("sample_rate", str(RATE)),
            ("channels", "1"), ("interim_results", "true"), ("punctuate", "true"),
-           ("smart_format", "true"), ("endpointing", "1400")]  # ~1.4s pause = end of read
+           ("smart_format", "true"), ("endpointing", "800")]  # ~0.8s pause = end of read (snappier)
 DG_URL = ("wss://api.deepgram.com/v1/listen?" + urllib.parse.urlencode(_PARAMS)
           + "".join("&keywords=" + urllib.parse.quote(k) for k in _KEYWORDS))
 
@@ -90,7 +90,8 @@ def _log_locked(q, ans, why, mode, cat):
     del state["log"][40:]
 
 PRECOMP_MIN = 8       # start trying an answer once the question is a bit under way
-PRECOMP_STEP = 5      # words of new speech between answer attempts (calm, not every word)
+PRECOMP_STEP = 5      # words of new speech between full-accuracy answer attempts
+THINK_STEP = 3        # words between fast "leaning" updates (keep a fresh answer ready for End)
 END_TIMEOUT = 18.0    # hard cap on the final solve (Opus-retry math can be ~12s); then fall back
 
 
@@ -253,7 +254,7 @@ async def _run(ws, client):
             with _lock:
                 state["transcript"] = qtext
             nwords = len(qtext.split())
-            if nwords >= last_think + PRECOMP_STEP and not think_inflight:
+            if nwords >= last_think + THINK_STEP and not think_inflight:
                 last_think = nwords
                 think_inflight.add(1)
                 t = asyncio.create_task(_think(client, qtext, my_gen))
