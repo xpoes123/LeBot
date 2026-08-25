@@ -73,11 +73,31 @@ def _catof(s):
     return "OTHER"
 
 
+def _norm_answer(s):
+    """Loose answer normalization for tick-to-tick equality (lowercase, drop punctuation)."""
+    return " ".join(re.sub(r"[^\w\s]", " ", (s or "").lower()).split())
+
+
+def _confirm_run(prev_norm, prev_run, norm, agrees):
+    """Track consecutive cross-model-confirmed ticks landing on the SAME answer. Resets on a
+    disagreement or a changed answer. A run of >=2 = the answer has held, both models agreeing,
+    across more than one evaluation — confident enough to buzz. -> (norm, run)."""
+    if not agrees or not norm:
+        return None, 0
+    if norm == prev_norm:
+        return norm, prev_run + 1
+    return norm, 1
+
+
+BUZZ_RUN = 2   # consecutive cross-model-confirmed ticks on one answer before we commit (buzz)
+
+
 _lock = threading.Lock()
 _buf = bytearray()
 state = {"mode": "waiting",      # waiting | reading | answering
          "category": "", "qformat": "", "transcript": "", "thinking": "",
          "answer": None, "reasoning": "", "resmode": "", "steps": [], "refining": False,
+         "buzz": False,   # early commit fired: a confident answer is in hand — buzz NOW
          "err": "", "gen": 0, "force_start": False, "force_end": False, "force_clear": False,
          "cat_override": "", "log": []}
 
@@ -108,19 +128,6 @@ def _capture():
             _buf.extend(chunk)
 
 
-async def _think(client, text, gen):
-    try:
-        d = (await client.post(f"{LEBOT_URL}/analyze", json={
-            "prefix": text, "category": state["category"] or "OTHER", "fast": True,
-            "total_words": max(40, len(text.split()) * 2), "history": []})).json()
-    except Exception:
-        d = {}
-    g = d.get("guess", "")
-    with _lock:
-        if state["gen"] == gen and g and g.upper() != "UNKNOWN":
-            state["thinking"] = g
-
-
 async def _full_call(client, text, cat):
     d = (await client.post(f"{LEBOT_URL}/analyze", json={
         "prefix": text, "category": cat or "OTHER", "fast": False,
@@ -132,7 +139,7 @@ def _begin(cat, form, text0):
     with _lock:
         state.update(mode="reading", category=(state["cat_override"] or cat), qformat=form,
                      transcript=text0, thinking="", answer=None, reasoning="", resmode="",
-                     steps=[], refining=False, gen=state["gen"] + 1)
+                     steps=[], refining=False, buzz=False, gen=state["gen"] + 1)
         return state["gen"]
 
 
@@ -154,11 +161,14 @@ async def _run(ws, client):
     answered, answered_words, seen_opts = False, 0, 0   # answered? at how many words? #MC options seen
     think_inflight, full_inflight = set(), set()
     pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
+    conf_norm, conf_run, committed = None, 0, False   # cross-model-confirmed run; early-buzz fired?
 
     def reset_reading():
         nonlocal reading, finals, interim, last_think, last_full, pre, answered, answered_words, seen_opts
+        nonlocal conf_norm, conf_run, committed
         reading, finals, interim, last_think, last_full = False, [], "", 0, 0
         answered, answered_words, seen_opts = False, 0, 0
+        conf_norm, conf_run, committed = None, 0, False
         pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
 
     async def precompute(text, words, gen, cat):
@@ -177,11 +187,11 @@ async def _run(ws, client):
                     steps.append({"w": words, "guess": g, "why": why})
         full_inflight.discard(1)
 
-    async def answer_now(qtext, gen, cat, interrupt=False):
-        # Show a quick answer INSTANTLY the moment the question ends — the confident rolled
-        # solve if we have one, else the live lean — then finalize with a considered solve in
-        # the background (which may correct it). This is what makes the answer appear on End
-        # instead of after a multi-second solve.
+    async def answer_now(qtext, gen, cat, interrupt=False, commit=False):
+        # Show a quick answer INSTANTLY — the confident rolled solve if we have one, else the
+        # live lean — then finalize with a considered solve in the background. `commit`=early
+        # buzz: we already hold a cross-model-confirmed answer, so it is deliverable now and the
+        # background solve may only ENRICH the reasoning, never change the answer the human buzzed on.
         quick = pre["answer"] if (pre["answer"] and pre["answer"].upper() != "UNKNOWN") \
             else state.get("thinking")
         have_pre_reason = bool(quick and quick == pre["answer"])
@@ -190,7 +200,7 @@ async def _run(ws, client):
                 state.update(answer=(quick or "…"),
                              reasoning=(pre["reasoning"] if have_pre_reason else ""),
                              resmode=(pre["mode"] if have_pre_reason else ""),
-                             refining=True, mode="waiting")
+                             refining=True, mode="waiting", buzz=commit)
 
         async def finalize():
             try:
@@ -201,7 +211,11 @@ async def _run(ws, client):
             with _lock:
                 if state["gen"] != gen:
                     return
-                if g and g.upper() != "UNKNOWN":
+                if commit:
+                    # committed answer is locked; only fill in the walkthrough once it lands
+                    if d and d.get("reasoning"):
+                        state.update(reasoning=d["reasoning"], resmode=d.get("mode", state["resmode"]))
+                elif g and g.upper() != "UNKNOWN":
                     state.update(answer=g, reasoning=d.get("reasoning", ""), resmode=d.get("mode", ""))
                 elif not quick:  # nothing shown and nothing found
                     state.update(answer="UNKNOWN",
@@ -210,6 +224,33 @@ async def _run(ws, client):
                 state["refining"] = False
                 _log_locked(qtext, state["answer"], state["reasoning"], state["resmode"], cat)
         asyncio.create_task(finalize())
+
+    async def confirm(qtext, words, gen, cat):
+        # The live lean AND the early-buzz decision. Hits the fast path (Sonnet lean +
+        # independent Haiku confirm). Shows the running lean; when the SAME answer comes back
+        # cross-model-confirmed BUZZ_RUN ticks in a row, commit — we hold the answer already.
+        nonlocal conf_norm, conf_run, committed, answered, answered_words
+        try:
+            d = (await client.post(f"{LEBOT_URL}/analyze", json={
+                "prefix": qtext, "category": cat or "OTHER", "fast": True,
+                "total_words": max(40, words * 2), "history": []})).json()
+        except Exception:
+            d = {}
+        g = d.get("guess", "")
+        named = bool(g and g.upper() != "UNKNOWN")
+        with _lock:
+            if state["gen"] == gen and named:
+                state["thinking"] = g
+        norm = _norm_answer(g) if (named and d.get("agrees")) else ""
+        conf_norm, conf_run = _confirm_run(conf_norm, conf_run, norm, bool(d.get("agrees")))
+        # short-answer only: for W/X/Y/Z MC the choices are read AFTER the stem, so we can't
+        # commit to a letter mid-stem — that path keeps the existing per-option behavior.
+        if (conf_run >= BUZZ_RUN and state["gen"] == gen and not committed and words >= 3
+                and "multiple" not in state["qformat"]):
+            pre.update(words=words, answer=g, reasoning=d.get("reasoning", "") or "cross-model confirmed",
+                       mode=d.get("mode", "recall"))
+            committed, answered, answered_words = True, True, words
+            await answer_now(qtext, gen, cat, commit=True)
 
     async for raw in ws:
         data = json.loads(raw)
@@ -236,7 +277,7 @@ async def _run(ws, client):
         if force_clear:                       # manual: drop the current read, back to listening
             reset_reading()
             with _lock:
-                state.update(mode="waiting", transcript="", thinking="", steps=[])
+                state.update(mode="waiting", transcript="", thinking="", steps=[], buzz=False)
             continue
 
         if not reading:
@@ -267,10 +308,11 @@ async def _run(ws, client):
             if (nwords >= last_think + THINK_STEP or new_option) and not think_inflight:
                 last_think = nwords
                 think_inflight.add(1)
-                t = asyncio.create_task(_think(client, qtext, my_gen))
+                t = asyncio.create_task(confirm(qtext, nwords, my_gen, state["category"]))
                 t.add_done_callback(lambda _: think_inflight.discard(1))
             if (((nwords >= PRECOMP_MIN and nwords >= last_full + PRECOMP_STEP)
-                 or (new_option and nwords >= PRECOMP_MIN)) and not full_inflight):
+                 or (new_option and nwords >= PRECOMP_MIN)) and not full_inflight
+                    and not committed):
                 last_full = nwords
                 full_inflight.add(1)
                 asyncio.create_task(precompute(qtext, nwords, my_gen, state["category"]))
@@ -312,7 +354,10 @@ async def _run(ws, client):
                 # end, or the runaway cap. Anything else (a pause / '?' / options) is TENTATIVE:
                 # answer now but keep transcribing, and re-answer if the reader reads more.
                 definitive = bool(m2 or conf) or force_end or nwords >= MAX_Q_WORDS
-                if len(end_q.split()) >= 3 and (not answered or nwords >= answered_words + 6):
+                # An early COMMIT is sticky: once we've buzzed a confirmed answer, a mere pause/'?'
+                # must not flip it (the human buzzed on it). Only a definitive end moves on.
+                if (len(end_q.split()) >= 3 and (not answered or nwords >= answered_words + 6)
+                        and not (committed and not definitive)):
                     await answer_now(end_q, my_gen, state["category"], interrupt)
                     answered, answered_words = True, nwords
                 if definitive:
@@ -370,6 +415,10 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
 .stepg{color:#bb9af7;font-weight:600}.stepy{color:#9aa3b2;font-size:13px;font-style:italic;margin-top:2px}
 .slabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
 .card{background:#2a2e45;border:1px solid #bb9af7;border-radius:10px;padding:18px;margin:16px 0}
+.card.buzz{border-color:#9ece6a;box-shadow:0 0 16px #9ece6a55}
+.buzznow{color:#9ece6a;font-weight:800;font-size:14px;letter-spacing:.08em;margin-bottom:8px;
+  text-transform:uppercase;animation:bz .7s ease-in-out infinite}
+@keyframes bz{50%{opacity:.35}}
 .alabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 .answer{font-size:30px;color:#9ece6a;font-weight:700;margin:4px 0 10px}
 .answer.prov{color:#e0af68;opacity:.7;font-style:italic}  /* provisional quick guess, still refining */
@@ -399,6 +448,7 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
   <div class=steps id=steps></div>
 </div>
 <div class=card id=card style=display:none>
+  <div class=buzznow id=buzznow style=display:none>● Buzz now</div>
   <div class=alabel>Answer</div>
   <div class=answer id=answer>—</div>
   <div class=why id=why></div>
@@ -429,8 +479,10 @@ async function tick(){
     +'<div class=stepg>'+esc(st.guess)+'</div>'+(st.why?'<div class=stepy>'+esc(st.why)+'</div>':'')+'</div>').join('')
   $('err').textContent=s.err||''
   let c=$('card')
+  c.className='card'+(s.buzz?' buzz':'')
+  $('buzznow').style.display=s.buzz?'block':'none'
   if(answering){c.style.display='block';$('answer').textContent='…';$('why').textContent='';$('mode').textContent=''}
-  else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('answer').className='answer'+(s.refining?' prov':'');$('why').textContent=s.reasoning||'';$('mode').textContent=(s.refining?'⟳ still thinking — quick guess, refining…':(s.resmode?('mode: '+s.resmode):''))}
+  else if(s.answer){c.style.display='block';$('answer').textContent=s.answer;$('answer').className='answer'+(s.refining&&!s.buzz?' prov':'');$('why').textContent=s.reasoning||'';$('mode').textContent=(s.buzz?'✓ confirmed — buzz and answer':(s.refining?'⟳ still thinking — quick guess, refining…':(s.resmode?('mode: '+s.resmode):'')))}
   else{c.style.display='none'}
   let lg=s.log||[]
   $('logh').style.display=lg.length?'block':'none'

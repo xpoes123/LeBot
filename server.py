@@ -118,10 +118,10 @@ async def upload_packet(
 
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
-    if req.fast:  # low-latency live path: single Haiku anticipation, no verbose/calc
-        guess, mode = answerer.anticipate_fast(req.prefix, req.category, n=3)
+    if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
+        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=3)
         guess = _mc_letter(guess, req.prefix)
-        buzz = _buzz_features(req, guess, mode, guess)
+        buzz = _buzz_features(req, guess, mode, haiku)  # real cross-model `agrees` drives early-buzz
         return {"guess": guess, "reasoning": "", **buzz}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
