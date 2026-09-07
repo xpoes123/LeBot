@@ -21,6 +21,7 @@ import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import httpx
 import websockets
@@ -395,38 +396,40 @@ async def _stream():
 
 PAGE = """<!doctype html><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>LeBot live</title><style>
-body{background:#1a1b26;color:#c0caf5;font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px;max-width:760px}
-h1{color:#7aa2f7;font-size:20px;margin:0 0 4px}.sub{color:#565f89;margin-bottom:16px}
+<title>LeBot live</title>
+<link rel=stylesheet href="/tokyo-night.css">
+<style>
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px;max-width:760px}
+h1{color:var(--blue);font-size:20px;margin:0 0 4px}.sub{color:var(--muted);margin-bottom:16px}
 button{font:600 14px inherit;border:0;border-radius:9px;padding:10px 16px;cursor:pointer;margin-right:8px}
-#start{background:#414868;color:#c0caf5}#stop{background:#414868;color:#c0caf5}
+#start{background:#414868;color:var(--text)}#stop{background:#414868;color:var(--text)}
 button:disabled{opacity:.35;cursor:default}
-select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8px;padding:8px;font:inherit;margin-left:8px}
+select{background:var(--surface);color:var(--text);border:1px solid #2f334d;border-radius:8px;padding:8px;font:inherit;margin-left:8px}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
-.reading{background:#9ece6a;box-shadow:0 0 8px #9ece6a}.wait{background:#565f89}.ans{background:#e0af68}
-.badge{font-size:12px;padding:2px 8px;border-radius:6px;background:#414868;color:#c0caf5;margin-left:8px}
-.now{background:#24283b;border:1px solid #2f334d;border-radius:10px;padding:16px;margin:16px 0}
+.reading{background:var(--green);box-shadow:0 0 8px var(--green)}.wait{background:var(--muted)}.ans{background:#e0af68}
+.badge{font-size:12px;padding:2px 8px;border-radius:6px;background:#414868;color:var(--text);margin-left:8px}
+.now{background:var(--surface);border:1px solid #2f334d;border-radius:10px;padding:16px;margin:16px 0}
 .q{color:#9aa3b2;font-size:14px;min-height:20px}
-.think{color:#7aa2f7;font-size:15px;margin-top:8px;min-height:20px}.think b{color:#bb9af7}
+.think{color:var(--blue);font-size:15px;margin-top:8px;min-height:20px}.think b{color:var(--purple)}
 .steps{margin-top:14px}
 .step{border-left:2px solid #2f334d;padding:6px 0 6px 12px;margin:0 0 6px}
-.step:last-child{border-left-color:#bb9af7}
-.stepw{color:#565f89;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
-.stepg{color:#bb9af7;font-weight:600}.stepy{color:#9aa3b2;font-size:13px;font-style:italic;margin-top:2px}
-.slabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
-.card{background:#2a2e45;border:1px solid #bb9af7;border-radius:10px;padding:18px;margin:16px 0}
-.card.buzz{border-color:#9ece6a;box-shadow:0 0 16px #9ece6a55}
-.buzznow{color:#9ece6a;font-weight:800;font-size:14px;letter-spacing:.08em;margin-bottom:8px;
+.step:last-child{border-left-color:var(--purple)}
+.stepw{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.stepg{color:var(--purple);font-weight:600}.stepy{color:#9aa3b2;font-size:13px;font-style:italic;margin-top:2px}
+.slabel{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+.card{background:#2a2e45;border:1px solid var(--purple);border-radius:10px;padding:18px;margin:16px 0}
+.card.buzz{border-color:var(--green);box-shadow:0 0 16px #9ece6a55}
+.buzznow{color:var(--green);font-weight:800;font-size:14px;letter-spacing:.08em;margin-bottom:8px;
   text-transform:uppercase;animation:bz .7s ease-in-out infinite}
 @keyframes bz{50%{opacity:.35}}
-.alabel{color:#565f89;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-.answer{font-size:30px;color:#9ece6a;font-weight:700;margin:4px 0 10px}
+.alabel{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.answer{font-size:30px;color:var(--green);font-weight:700;margin:4px 0 10px}
 .answer.prov{color:#e0af68;opacity:.7;font-style:italic}  /* provisional quick guess, still refining */
-.why{color:#c0caf5;line-height:1.6}.mode{color:#565f89;font-size:12px;margin-top:8px}
-.err{color:#f7768e;font-size:13px;margin-top:8px}
-.logh{color:#7aa2f7;font-size:13px;text-transform:uppercase;letter-spacing:.05em;margin:24px 0 6px;border-top:1px solid #2f334d;padding-top:14px}
+.why{color:var(--text);line-height:1.6}.mode{color:var(--muted);font-size:12px;margin-top:8px}
+.err{color:var(--red);font-size:13px;margin-top:8px}
+.logh{color:var(--blue);font-size:13px;text-transform:uppercase;letter-spacing:.05em;margin:24px 0 6px;border-top:1px solid #2f334d;padding-top:14px}
 .le{background:#1f2335;border:1px solid #2f334d;border-radius:9px;padding:12px 14px;margin:8px 0}
-.leh{font-size:12px;color:#565f89}.lea{color:#9ece6a;font-weight:700;font-size:17px;margin:2px 0}
+.leh{font-size:12px;color:var(--muted)}.lea{color:var(--green);font-weight:700;font-size:17px;margin:2px 0}
 .leq{color:#9aa3b2;font-size:13px;margin:4px 0}.lew{color:#a9b1d6;font-size:13px;line-height:1.5}
 </style>
 <h1>LeBot — live answerer</h1>
@@ -435,7 +438,7 @@ select{background:#24283b;color:#c0caf5;border:1px solid #2f334d;border-radius:8
   <button id=start onclick=fstart()>▶ Force start</button>
   <button id=stop onclick=fstop()>■ Answer now</button>
   <button id=clear onclick=fclear()>✕ Clear</button>
-  <label style="color:#565f89;font-size:13px;margin-left:8px">category
+  <label style="color:var(--muted);font-size:13px;margin-left:8px">category
   <select id=cat onchange=setcat()>
     <option value="">auto</option>__CATS__
   </select></label>
@@ -514,6 +517,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/state":
             with _lock:
                 self._send(200, json.dumps(state), "application/json")
+        elif self.path == "/tokyo-night.css":
+            css = (Path(__file__).parent / "tokyo-night.css").read_text()
+            self._send(200, css, "text/css")
         else:
             self._send(404, "no")
 
