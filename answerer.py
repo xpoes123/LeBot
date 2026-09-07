@@ -254,17 +254,20 @@ def anticipate_sa(prefix, category, n=1, model=None):
         return list(ex.map(one, range(n)))
 
 
-def anticipate_fast(prefix, category, n=3):
-    """Live-bot anticipation: Sonnet voted recall, but WITHOUT the calculator (a 500-token
-    call that made the full path 2-7s) or the verbose pass. ~1.5s and robust to garbled
-    live transcripts — Haiku returned UNKNOWN far too often. -> (answer, 'recall')."""
-    ans = _vote(anticipate_sa(prefix, category, n=n))   # default model = Sonnet
-    resolved, is_excl = resolve_exclusion(ans, prefix)
-    if is_excl:
-        return resolved, "recall"
-    if _list_prior_guess(resolved, prefix) or _parrots_stem(resolved, prefix):
+def anticipate_fast_confirm(prefix, category, n=3):
+    """Live EARLY-BUZZ signal. Sonnet lean + an INDEPENDENT Haiku vote, in parallel.
+    -> (sonnet_answer, haiku_answer, 'recall'). The caller buzzes only when the two AGREE
+    (the correctness signal that separates a premature guess from a settled one), so a buzz
+    always carries an answer already in hand — deliverable instantly, no extra solve.
+    Recall-only (no calculator): you buzz early on knowledge; a calc question is heard fully."""
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n)))                # Sonnet
+        fk = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=FAST)))    # Haiku
+        sonnet, haiku = fs.result(), fk.result()
+    resolved, is_excl = resolve_exclusion(sonnet, prefix)
+    if not is_excl and (_list_prior_guess(resolved, prefix) or _parrots_stem(resolved, prefix)):
         resolved = "UNKNOWN"
-    return resolved, "recall"
+    return resolved, haiku, "recall"
 
 
 import math
