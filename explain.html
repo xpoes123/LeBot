@@ -1,0 +1,767 @@
+<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>LeBot — How it thinks (walkthrough)</title><style>
+body{background:#1a1b26;color:#c0caf5;font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px}
+h1{color:#7aa2f7}.intro{color:#9aa3b2;max-width:760px;margin-bottom:8px}
+.card{background:#24283b;border:1px solid #2f334d;border-radius:10px;padding:18px;margin:18px 0;max-width:820px}
+.qhead{font-size:13px;color:#565f89;margin-bottom:4px}.gold{color:#9ece6a;font-weight:600}
+.full{margin:8px 0 14px;color:#a9b1d6}
+.step{border-left:2px solid #2f334d;padding:8px 0 8px 14px;margin:0 0 4px}
+.step.buzz{border-left-color:#bb9af7;background:#2a2e45;border-radius:0 8px 8px 0}
+.heard{color:#7aa2f7;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.frag{color:#c0caf5}.reason{color:#9aa3b2;font-style:italic;margin:3px 0}
+.commit{margin-top:3px}.ok{color:#9ece6a}.no{color:#f7768e}.unk{color:#565f89}
+.p{font-variant-numeric:tabular-nums;color:#e0af68}
+.bar{display:inline-block;height:8px;background:#7aa2f7;border-radius:2px;vertical-align:middle;margin-right:6px}
+.buzztag{color:#bb9af7;font-weight:700}
+</style></head><body>
+<h1>LeBot — how it thinks, step by step</h1>
+<div class=intro>For each question, every line is one moment as the question is read aloud:
+what the model has <b>heard so far</b>, its <b>reasoning</b>, the <b>terse answer</b> it would
+commit (✓/✗ vs the gold), and the trained buzzer's <b>P(correct)</b>. It buzzes 🔔 at the
+first moment P crosses 80%. Probabilities are from a buzzer that did <i>not</i> train on these questions.</div>
+<div class=card>
+<div class=qhead>ENERGY · WSBT</div>
+<div class=full>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name of this observation, which was known as a limitation of the big bang theory?</div>
+<div>gold answer: <span class=gold>Horizon problem / Homogeneity problem</span></div><hr style="border-color:#2f334d">
+<div class="step">
+<div class=heard>heard 0%</div>
+<div class=frag>Lawrence</div>
+<div class=reason>🧠 The question mentions &quot;Lawrence&quot; in the Energy category — this is almost certainly referring to the Lawrence Berkeley National Laboratory, or more likely Ernest O. Lawrence, inventor of the cyclotron.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 5%</div>
+<div class=frag>Lawrence Berkeley physicists observe</div>
+<div class=reason>🧠 The question is about a physics discovery at Lawrence Berkeley National Laboratory — could be many things (antimatter, new particles, dark matter detection, etc.), but without more context I cannot determine the specific answer.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 11%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions</div>
+<div class=reason>🧠 The question is about the observation of distant supernovae (Type Ia) by Lawrence Berkeley physicists, which led to the discovery of the accelerating expansion of the universe and dark energy.</div>
+<div class=commit>commits: <span class=no>dark energy ✗</span>
+&nbsp; <span class=bar style="width:22px"></span><span class=p>P=32%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 16%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in</div>
+<div class=reason>🧠 The question is about the 1998 discovery by Lawrence Berkeley Lab (Saul Perlmutter&#x27;s team) observing distant supernovae to find that the universe&#x27;s expansion is accelerating, leading to the concept of dark energy.</div>
+<div class=commit>commits: <span class=no>Dark energy ✗</span>
+&nbsp; <span class=bar style="width:33px"></span><span class=p>P=49%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 21%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are</div>
+<div class=reason>🧠 This is about the 1998 supernova observations showing the universe&#x27;s expansion is accelerating, leading to the discovery of dark energy.</div>
+<div class=commit>commits: <span class=no>accelerating away from us ✗</span>
+&nbsp; <span class=bar style="width:28px"></span><span class=p>P=40%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 27%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart</div>
+<div class=reason>🧠 This is describing the horizon problem in cosmology — regions so far apart they couldn&#x27;t have been in causal contact, yet have the same temperature/properties — which is solved by **inflation**.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:33px"></span><span class=p>P=47%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 32%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could</div>
+<div class=reason>🧠 The question is about the horizon problem in cosmology — distant regions in opposite directions are so far apart they couldn&#x27;t have been in causal contact, yet they have the same temperature/properties, which cosmic inflation solves.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:45px"></span><span class=p>P=65%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 38%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been</div>
+<div class=reason>🧠 The question is describing the **horizon problem** in cosmology — regions of space that couldn&#x27;t have been in causal contact yet appear uniform, which is the motivation for **inflation** theory.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:55px"></span><span class=p>P=79%</span>
+</div></div>
+<div class="step buzz">
+<div class=heard>heard 43% · 🔔 BUZZ</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact</div>
+<div class=reason>🧠 The question is describing the **horizon problem** — the mystery of why causally disconnected regions of the universe have the same temperature/properties — which is solved by **inflation**.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:61px"></span><span class=p>P=88%</span>
+ <span class=buzztag>← buzzes here</span></div></div>
+<div class="step">
+<div class=heard>heard 48%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another,</div>
+<div class=reason>🧠 The question describes regions of space that couldn&#x27;t have been in causal contact yet appear nearly identical (same temperature, etc.) — this is the **horizon problem**, which inflation solves.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:65px"></span><span class=p>P=94%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 54%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed</div>
+<div class=reason>🧠 The question is describing the **horizon problem** — the puzzle of why causally disconnected regions of the universe have the same temperature/properties — which is one of the key motivations for **inflation** (cosmic inflation theory).</div>
+<div class=commit>commits: <span class=ok>The horizon problem ✓</span>
+&nbsp; <span class=bar style="width:44px"></span><span class=p>P=63%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 59%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and</div>
+<div class=reason>🧠 The question is describing the **horizon problem** in cosmology — why opposite regions of the universe appear causally disconnected yet have nearly identical temperatures/properties — which motivates **inflation** as the solution.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:45px"></span><span class=p>P=65%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 64%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of</div>
+<div class=reason>🧠 This is describing the **horizon problem** in cosmology — the observation that causally disconnected regions of the universe share nearly identical properties (like CMB temperature), which motivates the theory of cosmic inflation.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:55px"></span><span class=p>P=79%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 70%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What</div>
+<div class=reason>🧠 The question describes the **horizon problem** — why opposite regions of the universe look identical despite never being in causal contact — which is solved by **inflation**.</div>
+<div class=commit>commits: <span class=no>inflation ✗</span>
+&nbsp; <span class=bar style="width:62px"></span><span class=p>P=89%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 75%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name</div>
+<div class=reason>🧠 The question describes regions of the universe that are causally disconnected yet appear remarkably similar (uniform CMB temperature), which is the **horizon problem**, and the solution is **cosmic inflation**.</div>
+<div class=commit>commits: <span class=ok>horizon problem ✓</span>
+&nbsp; <span class=bar style="width:52px"></span><span class=p>P=75%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 80%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name of this observation,</div>
+<div class=reason>🧠 The question describes regions of the universe that are causally disconnected yet appear remarkably similar (uniform CMB temperature), which is the classic **horizon problem** in cosmology.</div>
+<div class=commit>commits: <span class=ok>the horizon problem ✓</span>
+&nbsp; <span class=bar style="width:53px"></span><span class=p>P=77%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 86%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name of this observation, which was known</div>
+<div class=reason>🧠 This is describing the classic cosmological puzzle about why opposite regions of the universe look the same (same temperature, density) despite never being in causal contact — this is the **horizon problem**.</div>
+<div class=commit>commits: <span class=ok>horizon problem ✓</span>
+&nbsp; <span class=bar style="width:54px"></span><span class=p>P=78%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 91%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name of this observation, which was known as a limitation</div>
+<div class=reason>🧠 The question describes regions of space that couldn&#x27;t have been in causal contact yet appear uniform — this is the classic **horizon problem** in cosmology.</div>
+<div class=commit>commits: <span class=ok>horizon problem ✓</span>
+&nbsp; <span class=bar style="width:61px"></span><span class=p>P=88%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 96%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name of this observation, which was known as a limitation of the big</div>
+<div class=reason>🧠 The question describes regions of space that are causally disconnected yet appear uniform — this is the classic &quot;horizon problem&quot; (also called the horizon paradox), a known limitation of the standard Big Bang model.</div>
+<div class=commit>commits: <span class=ok>horizon problem ✓</span>
+&nbsp; <span class=bar style="width:65px"></span><span class=p>P=94%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 100%</div>
+<div class=frag>Lawrence Berkeley physicists observe that distant regions of space in opposite directions are so far apart that they could never have been in causal impact with one another, given the speed of light and the age of the universe. What is the name of this observation, which was known as a limitation of the big bang theory?</div>
+<div class=reason>🧠 The question describes regions of the universe that are causally disconnected yet have nearly identical properties (like CMB temperature), which is the classic **horizon problem** of the standard Big Bang model.</div>
+<div class=commit>commits: <span class=ok>The horizon problem ✓</span>
+&nbsp; <span class=bar style="width:57px"></span><span class=p>P=82%</span>
+</div></div>
+</div>
+<div class=card>
+<div class=qhead>PHYSICS · WISC-2021</div>
+<div class=full>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat frequency of 7 Hertz. What is the frequency of the third fork? [SA]</div>
+<div>gold answer: <span class=gold>235 HERTZ</span></div><hr style="border-color:#2f334d">
+<div class="step">
+<div class=heard>heard 0%</div>
+<div class=frag>There</div>
+<div class=reason>🧠 The question starts with &quot;There...&quot; which is far too little information to determine the topic.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 4%</div>
+<div class=frag>There are three tuning</div>
+<div class=reason>🧠 The question is about three tuning forks and likely asks about beat frequencies between them.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 9%</div>
+<div class=frag>There are three tuning forks. The first</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks, likely asking to find the frequency of an unknown fork given beat frequencies with known forks.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 13%</div>
+<div class=frag>There are three tuning forks. The first one is tuned</div>
+<div class=reason>🧠 The question is about beats between tuning forks, likely asking for a beat frequency or the frequency of one of the forks based on observed beat patterns.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 18%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency</div>
+<div class=reason>🧠 This is a beats/interference problem involving tuning forks at different frequencies, likely asking for a beat frequency or the frequency of one of the forks.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 22%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz,</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks, likely asking for the frequency of an unknown fork based on observed beats.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 27%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one</div>
+<div class=reason>🧠 This is a beats/interference problem involving tuning forks at different frequencies, likely asking for the beat frequency between two of the forks or the frequency of the third fork given beat frequencies.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 31%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at</div>
+<div class=reason>🧠 The question is setting up a beats/interference problem with multiple tuning forks at different frequencies, likely asking for the beat frequency between two or more of them.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 36%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of</div>
+<div class=reason>🧠 The question is setting up a beats/interference problem with multiple tuning forks, likely asking for the beat frequency or the frequency of the third fork.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 40%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>8 ✗</span>
+&nbsp; <span class=bar style="width:26px"></span><span class=p>P=37%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 45%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks — when the first (250 Hz) and second (242 Hz) are struck together, they produce 8 beats/sec, and likely a third fork will be introduced to find its frequency based on beats with one of the others.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 49%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks — when fork 1 (250 Hz) and fork 3 are played together, they produce some number of beats, and we need to find fork 3&#x27;s frequency (likely 246 Hz, giving 4 beats with fork 1 and 4 beats with fork 2, or some similar setup).</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 54%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear</div>
+<div class=reason>🧠 This is a beats problem — the first and second forks produce 8 beats/sec, and the question is setting up the third fork to also produce a certain number of beats with the first fork, likely asking for the frequency of the third fork.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 58%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency</div>
+<div class=reason>🧠 This is a beat frequency problem where we&#x27;re given three tuning forks (250 Hz, 242 Hz), and we&#x27;ll be told the beat frequency between forks 1 and 3, then asked to find the frequency of fork 3.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 63%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz.</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks, and will ask for the possible frequencies of the third fork (250 ± 15 Hz).</div>
+<div class=commit>commits: <span class=no>235 Hz and 265 Hz ✗</span>
+&nbsp; <span class=bar style="width:34px"></span><span class=p>P=49%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 67%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks, and will ask for the frequency of the third fork given that it produces 15 Hz beats with the 250 Hz fork, and some condition with the 242 Hz fork to disambiguate between 235 or 265 Hz.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 72%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks, asking for the frequency of the third fork given beats with both the first (250 Hz) and second (242 Hz) forks.</div>
+<div class=commit>commits: <span class=no>265 Hz ✗</span>
+&nbsp; <span class=bar style="width:40px"></span><span class=p>P=57%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 76%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you</div>
+<div class=reason>🧠 The question is about beat frequencies between tuning forks, asking for the beat frequency between the second (242 Hz) and third fork, where the third fork is either 265 or 235 Hz (250 ± 15), and we need to find |third - 242|.
+
+If third = 265 Hz: |265 - 242| = 23 Hz
+If third = 235 Hz: |235 - 242| = 7 Hz
+
+The question likely asks which value is heard — but without more context cl</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=1%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 81%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat</div>
+<div class=reason>🧠 The question is asking for the frequency of the third tuning fork, given beat frequencies with the first (250 Hz) and second (242 Hz) forks — the third fork must be either 265 or 235 Hz, and the beat with the second fork will disambiguate (235 Hz gives 7 Hz beat, 265 Hz gives 23 Hz beat).</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=1%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 85%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat frequency of 7</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>235 ✓</span>
+&nbsp; <span class=bar style="width:48px"></span><span class=p>P=70%</span>
+</div></div>
+<div class="step buzz">
+<div class=heard>heard 90% · 🔔 BUZZ</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat frequency of 7 Hertz. What is</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>235 ✓</span>
+&nbsp; <span class=bar style="width:57px"></span><span class=p>P=82%</span>
+ <span class=buzztag>← buzzes here</span></div></div>
+<div class="step">
+<div class=heard>heard 94%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat frequency of 7 Hertz. What is the frequency of</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>235 ✓</span>
+&nbsp; <span class=bar style="width:63px"></span><span class=p>P=90%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 99%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat frequency of 7 Hertz. What is the frequency of the third fork?</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>235 ✓</span>
+&nbsp; <span class=bar style="width:66px"></span><span class=p>P=95%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 100%</div>
+<div class=frag>There are three tuning forks. The first one is tuned at a frequency of 250 Hertz, and second one is tuned at a frequency of 242 Hertz. When the first and third forks are beat, you hear a beat frequency of 15 Hertz. When the second and third forks are beat, you hear a beat frequency of 7 Hertz. What is the frequency of the third fork? [SA]</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>235 ✓</span>
+&nbsp; <span class=bar style="width:68px"></span><span class=p>P=97%</span>
+</div></div>
+</div>
+<div class=card>
+<div class=qhead>PHYSICS · DAST1</div>
+<div class=full>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle that light approaches it divided by the speed of the light at the instant?</div>
+<div>gold answer: <span class=gold>BRACHISTOCHRONE</span></div><hr style="border-color:#2f334d">
+<div class="step">
+<div class=heard>heard 0%</div>
+<div class=frag>What</div>
+<div class=reason>🧠 The question is cut off after just &quot;What...&quot; — there&#x27;s no usable information to determine the topic.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 7%</div>
+<div class=frag>What shape is formed</div>
+<div class=reason>🧠 The question is asking about a geometric shape formed by some physical phenomenon—common physics examples include the shape of a magnetic field line pattern, the path of a projectile (parabola), or the shape of a water stream/surface. Without more context, the most classic &quot;what shape is formed&quot; question in physics is often about a parabola (projectile motion) or possibly an ellipse (orbits), but it&#x27;s too ambiguous to commit.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 14%</div>
+<div class=frag>What shape is formed when light passes</div>
+<div class=reason>🧠 The question is about the shape formed when light passes through an aperture or prism — most likely asking about diffraction patterns (circular aperture → Airy disk) or a prism dispersing light into a spectrum, but the most classic answer is a **cone** (as in a cone of light) or more likely this is about a **rainbow/arc** or the classic result of light through a prism forming a **spectrum**. However, &quot;what shape is formed when light passes through a small circular aperture&quot; gives an **Airy disk**, or through a</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 20%</div>
+<div class=frag>What shape is formed when light passes through an object</div>
+<div class=reason>🧠 The question is about light passing through an object forming a shape — this is almost certainly about a prism dispersing light into a spectrum, or more likely about the shape formed (a **rainbow** arc or a **cone** from a lens), but the most classic physics answer here is about a prism forming a **triangle** or light through a circular aperture. However, &quot;what shape is formed when light passes through an object&quot; most classically points to a **prism** producing a spectrum, but the *shape* answer is likely a **cone** or **circle** —</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 27%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally</div>
+<div class=reason>🧠 The question is about geometric optics and each infinitesimal element acting as a point source/lens, heading toward the caustic curve or the shape formed by light through a circular lens/drop — this is about the **cardioid** or more likely a **caustic**, but the classic answer for light through a circular object forming a shape is a **cardioid**.</div>
+<div class=commit>commits: <span class=no>Cardioid ✗</span>
+&nbsp; <span class=bar style="width:29px"></span><span class=p>P=43%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 34%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of</div>
+<div class=reason>🧠 The question is about optics and how light passes through infinitesimally thin layers of an object, which strongly suggests it&#x27;s heading toward describing how a lens (or similar refractive object) focuses light into a caustic curve or surface — but the most classic answer for light passing through thin layers forming a shape is a **caustic**, or possibly describing how a **lens** forms an image. However, the phrasing about &quot;each infinitesimally thin layer&quot; forming a shape sounds like it could be about a **paraboloid** or the shape of a</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 41%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has</div>
+<div class=reason>🧠 The question is describing how light passes through layers of an object, likely building toward describing the caustic/cross-section shape formed by a lens or refractive object — but the most classic physics question along these lines involves light passing through a **cone** or describing a **caustic curve**, though it could also be heading toward describing the shape formed by a **gradient-index** object. However, the phrasing &quot;each infinitesimally thin layer&quot; strongly suggests this is about a **caustic** or possibly the shape of a **lens** — but most likely this</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 48%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of</div>
+<div class=reason>🧠 The question is about light passing through a medium with a continuously varying index of refraction (gradient-index medium), which causes light to curve — this describes a mirage or more likely the shape traced is a **parabola** or the phenomenon produces a **caustic**, but the classic answer for light bending through layers of varying refractive index forming a shape is likely a **parabola** or **catenary**... actually, this sounds like it&#x27;s describing how a gradient index lens or atmosphere bends light into a curved path, and the shape formed is likely a **</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 55%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies</div>
+<div class=reason>🧠 The question is about light bending through a medium with a continuously varying index of refraction (gradient-index optics), which causes light rays to follow curved paths — this describes a **mirage** or more precisely the phenomenon producing a **parabolic** path, but the shape formed by the light path in such a medium is most classically a **parabola**... however, this setup more likely describes how a gradient index medium bends light into a curved shape, and the classic answer for light through a continuously varying refractive index (like the atmosphere) forming a shape</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 61%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine</div>
+<div class=reason>🧠 The question describes a medium where the refractive index varies sinusoidally with depth, causing light to follow a curved path — this is the setup for a **sinusoidal/ray-bending** scenario, classically producing a **sinusoidal** path, but more likely this is describing a gradient-index medium where light follows a **parabolic** or **sinusoidal** curve... actually, with index varying as sine, the ray path traced out forms a **sinusoid**.</div>
+<div class=commit>commits: <span class=no>Sinusoid ✗</span>
+&nbsp; <span class=bar style="width:43px"></span><span class=p>P=62%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 68%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle</div>
+<div class=reason>🧠 The question describes a gradient-index medium where the refractive index varies sinusoidally with angle, which causes light to follow a curved/sinusoidal path — this is heading toward a **sinusoidal** or **parabolic** shape, but more likely it&#x27;s describing the path of light in a medium producing a **sinusoidal** trajectory.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=1%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 75%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle that light approaches</div>
+<div class=reason>🧠 The question describes a gradient-index medium where the refractive index varies sinusoidally with angle, causing light to follow a curved path — this is the classic setup for a **mirage** or light following a **sinusoidal/parabolic** path, but more likely it&#x27;s describing how light bends in such a medium to trace out a **sinusoidal** shape.</div>
+<div class=commit>commits: <span class=no>Sinusoid ✗</span>
+&nbsp; <span class=bar style="width:46px"></span><span class=p>P=67%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 82%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle that light approaches it divided by</div>
+<div class=reason>🧠 The question describes Snell&#x27;s law (n₁sinθ₁ = n₂sinθ₂) applied continuously through a medium with a sinusoidally varying index of refraction, which would cause light to follow a curved path — this is the setup for a gradient-index medium producing a sinusoidal/curved ray path, but the classic shape associated with light bending through a continuously varying index is a **parabola** or the question may be heading toward a **catenary** or **circular arc**... actually, this sounds like</div>
+<div class=commit>commits: <span class=no>The question describes Snell&#x27;s law ✗</span>
+&nbsp; <span class=bar style="width:51px"></span><span class=p>P=74%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 89%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle that light approaches it divided by the speed of</div>
+<div class=reason>🧠 The question describes light bending continuously through a medium where the index of refraction varies with depth (like in the atmosphere or ocean), following a curved path — this is the setup for a ray following a sinusoidal/curved path, but more specifically this describes **Snell&#x27;s law** applied continuously, leading to a circular or curved arc. The phrasing &quot;sine of the angle divided by the speed&quot; points to Snell&#x27;s law (n = c/v, sin θ / v = constant), and continuous refraction through layers produces a **circular arc**</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=1%</span>
+</div></div>
+<div class="step buzz">
+<div class=heard>heard 95% · 🔔 BUZZ</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle that light approaches it divided by the speed of the light at</div>
+<div class=reason>🧠 This question describes Snell&#x27;s law applied continuously through a medium where the refractive index varies, which describes the path light takes through the atmosphere or a gradient-index medium — the classic result is that light follows a curved (circular/parabolic) arc, but the specific shape described with sinusoidal index variation suggests the answer is a **circle** (as in the derivation showing light paths are circular arcs in certain gradient media).</div>
+<div class=commit>commits: <span class=no>Circle ✗</span>
+&nbsp; <span class=bar style="width:56px"></span><span class=p>P=81%</span>
+ <span class=buzztag>← buzzes here</span></div></div>
+<div class="step">
+<div class=heard>heard 100%</div>
+<div class=frag>What shape is formed when light passes through an object where each infinitesimally thin layer of the object has an index of refraction that varies with the sine of the angle that light approaches it divided by the speed of the light at the instant?</div>
+<div class=reason>🧠 The question describes Snell&#x27;s law applied continuously through a medium with a continuously varying index of refraction, which causes light to follow a curved path — this is the setup for a ray bending into a specific curve shape, likely describing a **cycloid** or more classically the path described by Fermat&#x27;s principle leading to a **brachistochrone**-type curve, but in optics with sinusoidal index variation the light follows a **sinusoidal** or **circular** arc. Actually, the phrasing &quot;index of refraction varies with the</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:1px"></span><span class=p>P=2%</span>
+</div></div>
+</div>
+<div class=card>
+<div class=qhead>MATH · FE!M-2025</div>
+<div class=full>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin if it lands on its side. What is the probability that Theenash wins?</div>
+<div>gold answer: <span class=gold>45</span></div><hr style="border-color:#2f334d">
+<div class="step">
+<div class=heard>heard 0%</div>
+<div class=frag>An</div>
+<div class=reason>🧠 The question has only the word &quot;An&quot; — far too little information to determine the mathematical topic or answer.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 5%</div>
+<div class=frag>An unfair coin has</div>
+<div class=reason>🧠 The question is setting up a probability problem about a biased coin, likely asking for an expected value, probability of a specific outcome, or number of flips needed — impossible to determine the specific answer without more information.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 10%</div>
+<div class=frag>An unfair coin has a 23 chance</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>4/9 ✗</span>
+&nbsp; <span class=bar style="width:6px"></span><span class=p>P=9%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 16%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>4/9 ✗</span>
+&nbsp; <span class=bar style="width:11px"></span><span class=p>P=16%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 21%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1/2 ✗</span>
+&nbsp; <span class=bar style="width:8px"></span><span class=p>P=12%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 26%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>11/36 ✗</span>
+&nbsp; <span class=bar style="width:10px"></span><span class=p>P=16%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 31%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side,</div>
+<div class=reason>🧠 The question is setting up a probability distribution for a three-outcome coin (heads, side, tails) and will ask for the probability of some event (likely tails, which would be 1 - 2/3 - 1/6 = 1/6).</div>
+<div class=commit>commits: <span class=no>1/6 ✗</span>
+&nbsp; <span class=bar style="width:12px"></span><span class=p>P=18%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 36%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:17px"></span><span class=p>P=25%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 41%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1/6 ✗</span>
+&nbsp; <span class=bar style="width:18px"></span><span class=p>P=26%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 47%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash</div>
+<div class=reason>🧠 The question gives probabilities for a three-outcome coin (heads, side, tails) and is likely asking for the expected value or probability of some event involving flips — but the setup isn&#x27;t complete enough yet to determine the exact numerical answer.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 52%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin.</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:20px"></span><span class=p>P=30%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 57%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:32px"></span><span class=p>P=46%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 62%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads,</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>2/3 ✗</span>
+&nbsp; <span class=bar style="width:26px"></span><span class=p>P=38%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 67%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:28px"></span><span class=p>P=40%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 72%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:40px"></span><span class=p>P=58%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 78%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:51px"></span><span class=p>P=74%</span>
+</div></div>
+<div class="step buzz">
+<div class=heard>heard 83% · 🔔 BUZZ</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin if it lands</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:59px"></span><span class=p>P=85%</span>
+ <span class=buzztag>← buzzes here</span></div></div>
+<div class="step">
+<div class=heard>heard 88%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin if it lands on its side.</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:64px"></span><span class=p>P=92%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 93%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin if it lands on its side. What is the</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:67px"></span><span class=p>P=96%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 98%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin if it lands on its side. What is the probability that Theenash</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:68px"></span><span class=p>P=98%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 100%</div>
+<div class=frag>An unfair coin has a 23 chance of coming up heads, a 16 chance of landing on its side, and a 61 chance of coming up tails. Theenash flips the coin. He wins if it lands heads, loses if it lands tails, and reflips the coin if it lands on its side. What is the probability that Theenash wins?</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>4/5 ✓</span>
+&nbsp; <span class=bar style="width:69px"></span><span class=p>P=99%</span>
+</div></div>
+</div>
+<div class=card>
+<div class=qhead>ENERGY · Berkeley-2023</div>
+<div class=full>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the concentration of methanol is doubled while the concentration of the alkane is halved?</div>
+<div>gold answer: <span class=gold>ONE HALF</span></div><hr style="border-color:#2f334d">
+<div class="step">
+<div class=heard>heard 0%</div>
+<div class=frag>Scientists</div>
+<div class=reason>🧠 The question is cut off after just &quot;Scientists...&quot; — there&#x27;s no substantive content to determine the topic.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 5%</div>
+<div class=frag>Scientists in the Sarpong</div>
+<div class=reason>🧠 The question mentions &quot;Sarpong&quot; which likely refers to a research group (Prof. Richmond Sarpong at UC Berkeley), known for total synthesis of complex natural products. Without more context, I can&#x27;t determine the specific energy-related answer.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 10%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC</div>
+<div class=reason>🧠 The question is about a chemistry/synthesis topic from the Sarpong Lab at UC Berkeley, which is known for total synthesis of complex natural products — but with only this fragment, I cannot determine the specific compound or concept being asked about.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 16%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused</div>
+<div class=reason>🧠 The question is about the Sarpong Lab at UC Berkeley, which is known for total synthesis of complex natural products, likely heading toward a specific molecule or synthesis achievement.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 21%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new</div>
+<div class=reason>🧠 The question is about chemistry/energy research at UC Berkeley&#x27;s Sarpong Lab, which is known for total synthesis of natural products — but in an energy context, this could be heading toward synthesis of new materials or fuels. However, the Sarpong Lab is primarily known for complex molecule synthesis, and with &quot;energy&quot; category, it might relate to developing new catalysts or synthetic methods for energy-relevant compounds. Too little information to commit confidently.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 26%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total</div>
+<div class=reason>🧠 The question is about organic chemistry synthesis work in the Sarpong Lab, which is famous for total synthesis of complex natural products.</div>
+<div class=commit>commits: <span class=no>total synthesis ✗</span>
+&nbsp; <span class=bar style="width:25px"></span><span class=p>P=36%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 31%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various</div>
+<div class=reason>🧠 The question is about the Sarpong Lab&#x27;s work on total synthesis of natural products (likely complex alkaloids or terpenoids), but this is a chemistry/biology topic, not clearly an ENERGY category question — and it&#x27;s cut off too early to determine the specific compound being asked about.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 36%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While</div>
+<div class=reason>🧠 The question is about the Sarpong Lab&#x27;s total synthesis work, likely heading toward a specific natural product or synthetic technique they&#x27;re known for.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 41%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics</div>
+<div class=reason>🧠 The question is about kinetics in a chemistry/synthesis context — likely heading toward a rate law, activation energy, or a specific kinetic concept like the rate-determining step. However, this is categorized as ENERGY, so it may be asking about activation energy or transition state theory.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 47%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution</div>
+<div class=reason>🧠 The question is about kinetics of a substitution reaction (likely SN1/SN2 or nucleophilic aromatic substitution) in the context of organic synthesis — it will likely ask about a rate law, rate-determining step, or activation energy concept.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 52%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol</div>
+<div class=reason>🧠 The question is about a substitution reaction kinetics study in methanol solvent, likely heading toward identifying the mechanism (SN1 vs SN2) or a rate law/order determination.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 57%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with</div>
+<div class=reason>🧠 The question is about kinetics of a substitution reaction with methanol as a nucleophile/solvent, likely heading toward a specific rate law, mechanism (SN1 vs SN2), or energy-related concept like activation energy.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 62%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how</div>
+<div class=reason>🧠 The question is about a substitution reaction of a tertiary alkyl bromide (2-bromo-2-methylpentane) with methanol, which will proceed via SN1 mechanism — the question is likely asking about the rate law or rate-determining step.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 67%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the</div>
+<div class=reason>🧠 The question is about the kinetics of a substitution reaction between methanol and 2-bromo-2-methyl pentane (a tertiary alkyl halide → SN1), likely asking about the rate law or rate constant, possibly how the rate changes when concentration is altered.</div>
+<div class=commit>commits: <span class=unk>—</span>
+&nbsp; <span class=bar style="width:0px"></span><span class=p>P=0%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 72%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled</div>
+<div class=reason>🧠 The question is about SN1 kinetics with a tertiary alkyl halide (2-bromo-2-methylpentane) reacting with methanol — it will ask how the rate changes when the concentration of methanol (the solvent/nucleophile) is doubled or changed, and since SN1 rate depends only on the substrate, the answer is the rate is unchanged (scaled by 1).</div>
+<div class=commit>commits: <span class=no>The rate is unchanged ✗</span>
+&nbsp; <span class=bar style="width:42px"></span><span class=p>P=61%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 78%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1 ✗</span>
+&nbsp; <span class=bar style="width:48px"></span><span class=p>P=69%</span>
+</div></div>
+<div class="step buzz">
+<div class=heard>heard 83% · 🔔 BUZZ</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the concentration of methanol</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1 ✗</span>
+&nbsp; <span class=bar style="width:57px"></span><span class=p>P=82%</span>
+ <span class=buzztag>← buzzes here</span></div></div>
+<div class="step">
+<div class=heard>heard 88%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the concentration of methanol is doubled while</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1 ✗</span>
+&nbsp; <span class=bar style="width:63px"></span><span class=p>P=90%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 93%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the concentration of methanol is doubled while the concentration of</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1 ✗</span>
+&nbsp; <span class=bar style="width:66px"></span><span class=p>P=95%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 98%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the concentration of methanol is doubled while the concentration of the alkane is</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=no>1 ✗</span>
+&nbsp; <span class=bar style="width:68px"></span><span class=p>P=98%</span>
+</div></div>
+<div class="step">
+<div class=heard>heard 100%</div>
+<div class=frag>Scientists in the Sarpong Lab at UC Berkeley are focused on developing new mechanisms for total synthesis of various natural products. While investigating the kinetics of a substitution reaction where methanol is reacted with 2-bromo-2-methyl pentane, how much is the reaction rate scaled by if the concentration of methanol is doubled while the concentration of the alkane is halved?</div>
+<div class=reason>🧠 🧮 computed with the calculator</div>
+<div class=commit>commits: <span class=ok>1/2 ✓</span>
+&nbsp; <span class=bar style="width:56px"></span><span class=p>P=80%</span>
+</div></div>
+</div>
+</body></html>
