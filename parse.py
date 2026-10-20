@@ -58,12 +58,13 @@ def _strip_noise(text):
 
 def clean_answer(s):
     """Clean a short-answer gold: drop writer initials [XX] and 'End of Questions',
-    keep ACCEPT-alternatives as '/ alt' (the judge should honor them), drop
-    'do not accept'/'prompt' notes."""
+    keep ACCEPT-alternatives as '/ alt' and DO NOT ACCEPT clauses (the judge needs
+    both to grade), drop 'prompt' notes."""
     s = re.sub(r"\s+", " ", s).strip()
     s = re.sub(r"\s*\[[^\]]*\]", "", s)                                  # [AG] initials
     s = re.sub(r"(?i)\((?:accept|or)[:\s]+([^)]*)\)", r" / \1", s)        # accepts -> / alt
-    s = re.sub(r"(?i)\s*\((?:do not accept|prompt|reject)[^)]*\)", "", s)  # drop these
+    s = re.sub(r"(?i)\s*\((?:do not accept|reject)[:\s]+([^)]*)\)", r" (DO NOT ACCEPT: \1)", s)
+    s = re.sub(r"(?i)\s*\(prompt[^)]*\)", "", s)                        # drop prompts
     s = re.sub(r"(?i)\bend of questions?\b.*$", "", s)
     return re.sub(r"\s+", " ", s).strip(" .;:/").strip()
 

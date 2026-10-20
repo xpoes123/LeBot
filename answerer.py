@@ -10,8 +10,10 @@ sampling is the only calibrated signal. Letter-level agreement (not phrase-level
 absorbs harmless wording differences ("mitochondria" vs "the mitochondrion").
 """
 
+import json
 import os
 import re
+import urllib.request
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
@@ -22,6 +24,12 @@ import sequences
 LETTERS = ["W", "X", "Y", "Z"]
 MODEL = os.environ.get("LEBOT_MODEL", "claude-sonnet-4-6")       # System 2: thinking
 FAST = os.environ.get("LEBOT_FAST", "claude-haiku-4-5-20251001")  # System 1: subconscious
+# Homelab Ollama (Tailscale) for the offline judge only; empty OLLAMA_URL = disabled.
+# num_ctx must stay 16384: the GPU is shared and any other value forces a model reload.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:12b")
+OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "15"))
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
 _client = None  # lazy: so consensus()/LETTERS import without an API key (--dry)
 
 
@@ -562,8 +570,10 @@ def stream_answer(prefix, category):
     yield "reasoning", reasoning
 
 
-def judge(pred, gold):
-    """Semantic correctness for short answer (synonyms/equivalent forms count)."""
+def judge(pred, gold, local=True):
+    """Semantic correctness for short answer (synonyms/equivalent forms count).
+    Tries the homelab model first (offline label gen); local=False forces Haiku
+    (the live server path is latency-critical)."""
     if not pred or pred.upper() == "UNKNOWN":
         return False
     if _norm(pred) == _norm(gold):
@@ -572,12 +582,14 @@ def judge(pred, gold):
     dp, dg = re.sub(r"\D", "", pred), re.sub(r"\D", "", gold)
     if dp and dp == dg and (("/" in pred) != ("/" in gold)):
         return True
-    r = _call(
-        "You judge National Science Bowl short answers. Equivalent forms, synonyms, "
-        "and correct values (any units) count as correct; be reasonably lenient.",
-        f"Expected answer: {gold}\nContestant said: {pred}\n\nIs it correct? YES or NO.",
-        max_tokens=4, temperature=0.0, model=FAST,
-    )
+    system = ("You judge National Science Bowl short answers. Equivalent forms, synonyms, "
+              "and correct values (any units) count as correct; be reasonably lenient.")
+    user = f"Expected answer: {gold}\nContestant said: {pred}\n\nIs it correct? YES or NO."
+    if local:
+        r = (_local(system, user, max_tokens=4) or "").strip().strip(".!").upper()
+        if r in ("YES", "NO"):
+            return r == "YES"
+    r = _call(system, user, max_tokens=4, temperature=0.0, model=FAST)
     return r.strip().upper().startswith("Y")
 
 
@@ -637,6 +649,30 @@ def _text(msg):
         if getattr(b, "type", None) == "text":
             return b.text.strip()
     return ""
+
+
+def _local(system, user, max_tokens):
+    """One call to the homelab Ollama model. Never raises: None when disabled or on
+    any failure, so the caller falls through to its cloud path."""
+    if not OLLAMA_URL:
+        return None
+    # Ollama silently truncates past num_ctx; ~3 chars/token is conservative.
+    if (len(system) + len(user)) // 3 + max_tokens > OLLAMA_NUM_CTX:
+        return None
+    body = {
+        "model": OLLAMA_MODEL,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "stream": False, "think": False, "keep_alive": "24h",
+        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX, "num_predict": max_tokens},
+    }
+    req = urllib.request.Request(
+        OLLAMA_URL.rstrip("/") + "/api/chat", data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
+            return (json.load(resp).get("message") or {}).get("content") or None
+    except Exception:
+        return None
 
 
 def _call(system, user, max_tokens, temperature, model=None):
