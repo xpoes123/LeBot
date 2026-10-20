@@ -295,7 +295,7 @@ def _mc_epilogue(req: FullReq, stem_steps, total):
     matched, conf, votes = None, 0.0, []
     if stem_value:
         for k, text in enumerate(opts):
-            if answerer.judge(stem_value, text):
+            if answerer.judge(stem_value, text, local=False):
                 matched, conf = MC_LETTERS[k], 1.0
                 break
     # 2. Otherwise the answer must be SELECTED by reasoning over the choices themselves
