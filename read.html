@@ -94,9 +94,9 @@ function beep() {
   } catch (e) {}
 }
 
-async function analyze(prefix, fast) {
+async function analyze(prefix, fast, mode) {
   return (await fetch('/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prefix, category: $('cat').value, fast, mode: $('mode').value,
+    body: JSON.stringify({ prefix, category: $('cat').value, fast, mode: mode || $('mode').value,
                            total_words: Math.max(40, prefix.split(/\s+/).length * 2), history: fast ? history.slice() : [] }) })).json();
 }
 
@@ -159,15 +159,24 @@ async function endQuestion() {
   if (ended) return;
   ended = true;
   const my = gen;
-  if (!buzzed) {   // like live: no early buzz -> answer when the reading ends
-    $('buzz').textContent = 'end of question — solving…';
-    const t = performance.now();
+  if (!buzzed) {   // reading ended without an early buzz: buzz now, answer inside the 2 s window
+    beep();
+    const t = performance.now(), text = heardText();
+    buzzed = { at: words().length, guess: 'UNKNOWN', end: true };
+    $('buzz').textContent = 'BUZZ at end — answering…'; $('buzz').className = 'on'; render();
+    const full = analyze(text, false).catch(() => ({}));               // considered solve, if it makes the window
     let g = '';
-    try { g = (await analyze(heardText(), false)).guess || ''; } catch (e) {}
+    try { g = (await analyze(text, true, 'full')).guess || ''; } catch (e) {}   // fast best guess, ~0.9 s
     if (my !== gen) return;
-    buzzed = { at: words().length, guess: g || 'UNKNOWN', end: true };
+    buzzed.guess = g || 'UNKNOWN';
     $('buzz').textContent = 'answered at end: ' + buzzed.guess;
-    $('buzzat').textContent = `full solve ${Math.round(performance.now() - t)} ms`;
+    $('buzzat').textContent = `fast answer ${Math.round(performance.now() - t)} ms`;
+    const f = await Promise.race([full, new Promise(res => setTimeout(() => res(null), Math.max(0, 2000 - (performance.now() - t))))]);
+    if (my !== gen) return;
+    if (f && f.guess && f.guess.toUpperCase() !== 'UNKNOWN') {
+      buzzed.guess = f.guess; $('buzz').textContent = 'answered at end: ' + f.guess;
+      $('buzzat').textContent += ` · full solve in time: ${f.guess}`;
+    }
     render();
   }
   finish();
@@ -225,7 +234,7 @@ async function startMic() {
     if (!ended && !buzzed && n >= 3 && n > checked && inflight < 3) { checked = n; tick(n, my); }   // newest word, up to 3 in flight
     // (silence messages returned above, so only real words reset the end-of-question timer)
     clearTimeout(silenceT);    // ~2 s of silence after speech = end of question
-    if (!buzzed) silenceT = setTimeout(() => { if (my === gen && words().length >= 5) endQuestion(); }, 2200);
+    if (!buzzed) silenceT = setTimeout(() => { if (my === gen && words().length >= 5) endQuestion(); }, 1500);
   };
   active = true;
   $('mic').textContent = '■ Stop'; $('mic').classList.add('live'); $('end').disabled = false;

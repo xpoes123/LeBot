@@ -239,7 +239,7 @@ def _clean_answer(r):
     if re.match(r"(?i)(for|in the|since|because|if|when|as the|according|assuming|"
                 r"we|let|first|note that|given|thus|therefore|so the)\b[\s,]+\S+", r):
         return "UNKNOWN"
-    if re.match(r"(?i)the (question|problem|answer)\b", r):   # meta-talk ("The question ..."), not a term
+    if re.match(r"(?i)(the (question|problem|answer)|i|i'm|let me|we|this)\b", r):   # meta-talk, not a term
         return "UNKNOWN"
     # a dangling connective/preposition at the end = truncated mid-phrase, not a clean
     # term (excludes "a"/"an" so "vitamin A", "plan B" survive)
@@ -273,19 +273,41 @@ def anticipate_sa(prefix, category, n=1, model=None, force=False):
         return list(ex.map(one, range(n)))
 
 
-_MC_OPT = re.compile(r"(?i)(?:^|[\s.,;:])w[,.:)]\s")   # choices always start at W; "x, y" alone is algebra
+_MC_OPT = re.compile(r"(?i)(?:^|[\s.,;:?])w[,.:)]?\s+[a-z0-9]")   # choices start at W; "x, y" alone is algebra
+_MC_X = re.compile(r"(?i)(?:^|[\s.,;:])x[,.:)]?\s+[a-z0-9]")
 
 
-_MC_Z = re.compile(r"(?i)(?:^|[\s.,;:])z[,.:)]?(\s|$)")   # "Z" announced = W, X, Y fully read
+_MC_Y = re.compile(r"(?i)(?:^|[\s.,;:])(?:y|why)[,.:)]?\s+[a-z0-9]")   # "Y, <text>" (ASR may write "why")
+# (live ASR often drops the commas: "w wind duration, x wind speed, y fetch")
+
+
+_MC_STRICT = re.compile(r"(?i)(?:^|[\s.,;:?])w[,.:)]\s")
+_MC_SAID = re.compile(r"(?i)multiple[- ]?choice")
+
+
+def is_mc(prefix):
+    """Announced as multiple choice, or choices read with punctuation ("W, ...") — loose letters alone are algebra."""
+    return bool(_MC_SAID.search(prefix[:150]) or _MC_STRICT.search(prefix))
+
+
+def mc_past_y(prefix):
+    """Choices W and X are done and Y's text has started: top players buzz here."""
+    w = is_mc(prefix) and _MC_OPT.search(prefix)
+    x = w and _MC_X.search(prefix, w.end())
+    return bool(x and _MC_Y.search(prefix, x.end()))
 
 
 def mc_commit(prefix, category):
-    """Choices W-Y are read and Z is being announced: strong players buzz NOW. Forced letter."""
+    """Choice Y is being read (W, X done): strong players buzz NOW and decide in the answer window.
+    Forced letter; transcription may garble words ("fetch" -> "Dutch")."""
     r = _call(
         META_SA.format(category=category),
-        f"A multiple-choice tossup is being read aloud; choices W, X and Y have been read and Z is being "
-        f"announced:\n\"{prefix}...\"\n\nYou must commit now. Reply with ONLY one letter: the choice among "
-        "W, X, Y that answers the question, or Z if none of them does.\nLetter:",
+        f"A multiple-choice tossup is being read aloud (live transcript, may contain mis-heard words); choices "
+        f"W and X have been read and Y is being read, Z may not have been read yet:\n\"{prefix}...\"\n\n"
+        "A choice that makes no sense here was almost certainly mis-heard: read it as the plausible scientific term "
+        "it sounds like (e.g. \"catch mint\" -> catchment) — never pick a choice just because its transcript is "
+        "nonsense. You have buzzed and must commit now. Reply with ONLY one letter: the choice among W, X, Y that "
+        "answers the question, or Z if none of them does.\nLetter:",
         max_tokens=5, temperature=0.0)
     m = re.match(r"\s*([WXYZ])\b", r.upper())
     return m.group(1) if m else "Z"
@@ -308,7 +330,7 @@ def mc_fast(prefix, category, model=None):
     return m.group(1) if m else "UNKNOWN"
 
 
-def anticipate_fast_confirm(prefix, category, n=3, force=False):
+def anticipate_fast_confirm(prefix, category, n=3, force=False, haiku=True):
     """Live EARLY-BUZZ signal. Sonnet lean + an INDEPENDENT Haiku vote, in parallel.
     -> (sonnet_answer, haiku_answer, 'recall'). The caller buzzes only when the two AGREE
     (the correctness signal that separates a premature guess from a settled one), so a buzz
@@ -319,14 +341,14 @@ def anticipate_fast_confirm(prefix, category, n=3, force=False):
     seq = sequences.solve_ordering(prefix)
     if seq is not None:
         return seq, seq, "seq"
-    if _MC_OPT.search(prefix):
+    if is_mc(prefix) and _MC_OPT.search(prefix):
         with ThreadPoolExecutor(max_workers=2) as ex:
             fs = ex.submit(mc_fast, prefix, category)
             fk = ex.submit(mc_fast, prefix, category, FAST)
             return fs.result(), fk.result(), "mc"
     with ThreadPoolExecutor(max_workers=2) as ex:
         fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, force=force)))   # Sonnet
-        fk = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=FAST)))    # Haiku
+        fk = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=FAST)) if haiku else "UNKNOWN")
         sonnet, haiku = fs.result(), fk.result()
     resolved, is_excl = resolve_exclusion(sonnet, prefix)
     if not is_excl and (_list_prior_guess(resolved, prefix) or _parrots_stem(resolved, prefix)):

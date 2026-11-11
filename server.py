@@ -106,10 +106,11 @@ def read_page():
 
 
 LISTEN_MAX_S = 180   # one /read question; caps Deepgram spend on this public endpoint
-_DG = ("wss://api.deepgram.com/v1/listen?model=nova-2&interim_results=true&punctuate=true"
+# nova-3: TTS-read tossups, word lag median 0.60 s / p90 1.4 s vs nova-2 0.94 / 2.8 s, WER 14% vs 16%
+_DG = ("wss://api.deepgram.com/v1/listen?model=nova-3&interim_results=true&punctuate=true"
        "&smart_format=true&endpointing=800"   # container (webm/opus) is auto-detected
-       + "".join(f"&keywords={k}" for k in ("W:5", "X:5", "Y:5", "Z:5", "toss-up:3", "multiple%20choice:3",
-                                             "short%20answer:3")))   # hear the choice letters
+       + "".join(f"&keyterm={k}" for k in ("W", "X", "Y", "Z", "toss-up", "multiple%20choice",
+                                            "short%20answer")))   # hear the choice letters
 
 
 @app.websocket("/listen")
@@ -198,13 +199,14 @@ async def upload_packet(
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
     if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
-        if answerer._MC_OPT.search(req.prefix) and answerer._MC_Z.search(req.prefix):
-            # MC with W, X, Y read: always buzz (top-player strategy) — the one letter that fits, else Z
+        if answerer.mc_past_y(req.prefix):
+            # MC with Y being read: always buzz (top-player strategy); the overread re-answer refines the letter
             guess = answerer.mc_commit(req.prefix, req.category)
             return {"guess": guess, "reasoning": "", "mode": "mc-commit", "agrees": None, "p_jev": None,
                     "p_gate": 1.0, "gate_T": None, "gate_buzz": True}
-        force = MODES.get(req.mode, MODES["balanced"])[1]
-        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=1, force=force)
+        _t, force, need_agree = MODES.get(req.mode, MODES["balanced"])
+        guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
+            req.prefix, req.category, n=1, force=force, haiku=need_agree)
         guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, haiku)
         return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode)}
