@@ -154,6 +154,26 @@ async def listen(ws: WebSocket):
         pass
 
 
+@app.post("/relisten")
+async def relisten(request: Request):
+    """/read's answer step: re-transcribe the question's audio so far in batch mode. With the whole clip as context
+    Deepgram fixes what streaming dropped or garbled ("y, fetch" streamed as "y, z"). ~0.2-0.5 s; capped at 1.2 s so
+    the 2 s answer window survives — "" means use the streaming text."""
+    import httpx
+    audio = await request.body()
+    key = os.environ.get("DEEPGRAM_API_KEY", "")
+    if not key or not audio or len(audio) > 5_000_000:
+        return {"text": ""}
+    try:
+        async with httpx.AsyncClient(timeout=1.2) as c:
+            r = await c.post("https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true"
+                             + "".join(f"&keyterm={k}" for k in ("W", "X", "Y", "Z")), content=audio,
+                             headers={"Authorization": f"Token {key}", "Content-Type": "audio/webm"})
+        return {"text": r.json()["results"]["channels"][0]["alternatives"][0]["transcript"]}
+    except Exception:
+        return {"text": ""}
+
+
 @app.get("/tokyo-night.css")
 def tokyo_css():
     return HTMLResponse(Path("tokyo-night.css").read_text(), media_type="text/css")

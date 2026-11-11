@@ -77,7 +77,7 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let sock = null, recorder = null, stream = null, active = false, gen = 0;
+let sock = null, recorder = null, stream = null, active = false, gen = 0, chunks = [];
 function warn(msg) { $('nosr').textContent = msg; $('nosr').hidden = !msg; }
 let finals = '', interim = '', checked = 0, inflight = 0, history = [], latest = -1;
 let buzzed = null, ended = false, silenceT = null, results = [];
@@ -113,6 +113,29 @@ function render() {
     + (buzzed ? ` <span class="buzzmark">BUZZ @${buzzed.at}</span>` : '') || '—';
 }
 
+// answer step: re-listen to the whole question so far (batch ASR fixes streaming slips); falls back to the stream
+async function bestText() {
+  const live = heardText();
+  if (!chunks.length) return live;
+  try {
+    const r = await (await fetch('/relisten', { method: 'POST', headers: { 'content-type': 'audio/webm' },
+                                                 body: new Blob(chunks, { type: 'audio/webm' }) })).json();
+    return r.text && r.text.split(/\s+/).length >= live.split(/\s+/).length * 0.6 ? r.text : live;
+  } catch (e) { return live; }
+}
+
+// answer now from the live transcript, and again from the re-listened audio in parallel; the re-listen wins if
+// it lands within the window (the window closes at finish()). onAnswer(guess, label) updates the buzz.
+function answerBoth(my, final, onAnswer) {
+  const live = heardText(), t = performance.now();
+  let fixed = false;
+  const ok = d => d && d.guess && d.guess !== '…' && d.guess.toUpperCase() !== 'UNKNOWN';
+  analyze(live, true, null, final).then(d => { if (my === gen && !fixed && ok(d)) onAnswer(d.guess, `${Math.round(performance.now() - t)} ms`); }).catch(() => {});
+  bestText().then(txt => txt === live ? null : analyze(txt, true, null, final)).then(d => {
+    if (my === gen && ok(d)) { fixed = true; onAnswer(d.guess, `re-listened, ${Math.round(performance.now() - t)} ms`); }
+  }).catch(() => {});
+}
+
 async function tick(n, my) {
   inflight++;
   const t0 = performance.now();
@@ -131,11 +154,10 @@ async function tick(n, my) {
       doBuzz(d.guess, n, my);
       if (d.mode === 'calc-ready') {   // buzzed on readiness: compute the answer now, inside the window
         const t = performance.now();
-        analyze(words().join(' '), true, null, true).then(f => {
-          if (my !== gen || !buzzed || buzzed.over || !f.guess || f.guess.toUpperCase() === 'UNKNOWN') return;
-          buzzed.guess = f.guess; $('buzz').textContent = 'BUZZ — ' + f.guess;
-          $('buzzat').textContent += ` · computed ${f.guess} at ${Math.round(performance.now() - t)} ms`;
-        }).catch(() => {});
+        answerBoth(my, true, (g, how) => {
+          if (!buzzed || buzzed.over || $('grade').hidden === false) return;
+          buzzed.guess = g; $('buzz').textContent = 'BUZZ — ' + g; $('buzzat').textContent += ` · computed ${g} (${how})`;
+        });
       }
     }
   } catch (e) {
@@ -190,6 +212,10 @@ async function endQuestion() {
     buzzed.guess = g || 'UNKNOWN';
     $('buzz').textContent = 'answered at end: ' + buzzed.guess;
     $('buzzat').textContent = `fast answer ${Math.round(performance.now() - t)} ms`;
+    answerBoth(my, true, (g2, how) => {   // a re-listened answer replaces it if it lands in the window
+      if ($('grade').hidden === false) return;
+      buzzed.guess = g2; $('buzz').textContent = 'answered at end: ' + g2; $('buzzat').textContent += ` · ${g2} (${how})`;
+    });
     const f = await Promise.race([full, new Promise(res => setTimeout(() => res(null), Math.max(0, 2000 - (performance.now() - t))))]);
     if (my !== gen) return;
     if (f && f.guess && f.guess.toUpperCase() !== 'UNKNOWN') {
@@ -226,7 +252,7 @@ function drawScore() {
 async function startMic() {
   gen++; const my = gen;
   warn('');
-  finals = interim = ''; checked = 0; inflight = 0; history = []; latest = -1; buzzed = null; ended = false;
+  finals = interim = ''; chunks = []; checked = 0; inflight = 0; history = []; latest = -1; buzzed = null; ended = false;
   $('guess').textContent = '—'; $('pv').textContent = $('tv').textContent = $('ag').textContent = '—';
   $('buzz').textContent = 'listening…'; $('buzz').className = ''; $('buzzat').textContent = '';
   $('grade').hidden = true; $('log').innerHTML = ''; render();
@@ -236,7 +262,7 @@ async function startMic() {
   sock.onerror = () => warn('Lost the connection to the transcriber.');
   sock.onopen = () => {
     recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-    recorder.ondataavailable = e => { if (e.data.size && sock.readyState === 1) sock.send(e.data); };
+    recorder.ondataavailable = e => { if (e.data.size) { chunks.push(e.data); if (sock.readyState === 1) sock.send(e.data); } };
     recorder.start(100);   // 100 ms chunks: less buffering before Deepgram hears it
   };
   sock.onmessage = m => {
@@ -253,11 +279,10 @@ async function startMic() {
     if (!ended && !buzzed && mcPastY(heardText())) {   // MC past Y: buzz first, answer inside the 2 s window
       doBuzz('…', n, my);
       const t = performance.now();
-      analyze(heardText(), true).then(d => {
-        if (my !== gen || !buzzed || buzzed.over || !d.guess || d.guess.toUpperCase() === 'UNKNOWN') return;
-        buzzed.guess = d.guess; $('buzz').textContent = 'BUZZ — ' + d.guess;
-        $('buzzat').textContent += ` · answered ${d.guess} at ${Math.round(performance.now() - t)} ms`;
-      }).catch(() => {});
+      answerBoth(my, false, (g, how) => {
+        if (!buzzed || buzzed.over || $('grade').hidden === false) return;
+        buzzed.guess = g; $('buzz').textContent = 'BUZZ — ' + g; $('buzzat').textContent += ` · answered ${g} (${how})`;
+      });
       return;
     }
     if (!ended && !buzzed && n >= 3 && n > checked && inflight < 3) { checked = n; tick(n, my); }   // newest word, up to 3 in flight
