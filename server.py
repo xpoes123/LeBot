@@ -3,13 +3,15 @@ POST /analyze  {prefix, category, total_words, history:[{guess,mode}]}
             -> {guess, mode, stability_run, churn, frac, p_buzz, buzzes, reasoning}
 GET  /       -> lebot.html
 """
+import asyncio
 import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -101,6 +103,43 @@ def watch():
 @app.get("/read")
 def read_page():
     return HTMLResponse(Path("read.html").read_text())
+
+
+LISTEN_MAX_S = 180   # one /read question; caps Deepgram spend on this public endpoint
+_DG = ("wss://api.deepgram.com/v1/listen?model=nova-2&interim_results=true&punctuate=true"
+       "&smart_format=true&endpointing=800")   # container (webm/opus) is auto-detected
+
+
+@app.websocket("/listen")
+async def listen(ws: WebSocket):
+    """/read's mic relay: browser audio chunks -> Deepgram -> transcript JSON back. The key stays here."""
+    import websockets   # only this route needs it
+    await ws.accept()
+    key = os.environ.get("DEEPGRAM_API_KEY", "")
+    if not key:
+        await ws.send_text(json.dumps({"type": "Error", "error": "server has no DEEPGRAM_API_KEY"}))
+        return await ws.close()
+    async with websockets.connect(_DG, additional_headers={"Authorization": f"Token {key}"}) as dg:
+        async def up():
+            while True:
+                m = await ws.receive()
+                if m["type"] == "websocket.disconnect":
+                    break
+                if m.get("bytes"):
+                    await dg.send(m["bytes"])
+            await dg.send(json.dumps({"type": "CloseStream"}))
+
+        async def down():
+            async for msg in dg:
+                await ws.send_text(msg)
+        tasks = [asyncio.create_task(up()), asyncio.create_task(down())]
+        await asyncio.wait(tasks, timeout=LISTEN_MAX_S, return_when=asyncio.FIRST_COMPLETED)
+        for t in tasks:
+            t.cancel()
+    try:
+        await ws.close()
+    except Exception:
+        pass
 
 
 @app.get("/tokyo-night.css")
