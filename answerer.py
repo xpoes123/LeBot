@@ -353,7 +353,19 @@ def quick_compute(prefix, category):
 
 
 def is_computational(prefix, category):
-    return category in ("MATH", "PHYSICS", "CHEMISTRY", "ENERGY", "EARTH_SPACE") and bool(re.search(r"\d", prefix))
+    """Numbers present — as digits or, since live ASR writes "two ... nine meters", as words."""
+    return category in ("MATH", "PHYSICS", "CHEMISTRY", "ENERGY", "EARTH_SPACE") and bool(
+        re.search(r"\d", prefix) or len(_NUMBER_WORDS.findall(prefix)) >= 2)
+
+
+_ASKED = re.compile(r"(?i)\b(what|which|who|whom|whose|how|why|when|where|name|identify|give|find|calculate|"
+                    r"compute|determine|estimate|express|provide|state)\b|\b(this|these)\s+[a-z]")
+
+
+def asked_yet(prefix):
+    """Has the tossup asked something ("what is…") or pointed at its answer ("this element…")? Held out, balanced
+    buzzes before that were right 43% of the time (topic guesses), after it 87%."""
+    return bool(_ASKED.search(prefix))
 
 
 def anticipate_fast_confirm(prefix, category, n=3, force=False, haiku=True):

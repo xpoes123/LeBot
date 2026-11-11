@@ -222,7 +222,7 @@ def analyze(req: AnalyzeReq):
             req.prefix, req.category, n=1, force=force, haiku=need_agree)
         guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, haiku)
-        return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode)}
+        return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode, req.prefix)}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
     with ThreadPoolExecutor(max_workers=2) as ex:
@@ -257,15 +257,20 @@ def _reason_text(mode, reasoning):
 # mode -> (Jev threshold, Sonnet always guesses, Haiku must agree). Jev owns the buzz, so the guesser should
 # surface its best guess instead of abstaining. Held out (120 Qs, median buzz point / acc):
 #   full      always-guess, Jev>=0.6  -> @49%, 51%   (a gamble)
-#   balanced  always-guess, Jev>=0.8  -> @56%, 68%   (cautious prompt at the same acc: @64%)
+#   balanced  always-guess, Jev>=0.8, and only once the question has asked (PRE_ASK_T) -> @76%, 84%
 #   confident cautious + Haiku agrees -> @86%, 89%   (563 Qs)
 MODES = {"full": (0.6, True, False), "balanced": (0.8, True, False), "confident": (0.8, False, True)}
 
 
-def _gate(guess: str, buzz: dict, mode: str):
+PRE_ASK_T = 0.95   # before the question asks anything, only near-certain buzzes (balanced/confident)
+
+
+def _gate(guess: str, buzz: dict, mode: str, prefix: str = ""):
     """The live buzz decision is Jev's alone: P(Sonnet's running guess is right, given the question so far).
     Sonnet then gets the ~2 s answer window to finalize (live.py)."""
     t, _force, need_agree = MODES.get(mode, MODES["balanced"])
+    if mode != "full" and not answerer.asked_yet(prefix):
+        t = max(t, PRE_ASK_T)
     p = buzz["p_jev"]
     named = bool(guess and guess.upper() != "UNKNOWN")
     ok = named and p is not None and p >= t and (bool(buzz["agrees"]) or not need_agree)
