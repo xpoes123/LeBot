@@ -85,20 +85,22 @@ def render(cards):
     esc = html.escape
     out = [f"""<!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>LeBot — Short-Answer Anticipation</title><style>
-body{{background:#1a1b26;color:#c0caf5;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px}}
-h1{{color:#7aa2f7;font-size:22px}} .sub{{color:#565f89;margin-bottom:20px}}
-.card{{background:#24283b;border:1px solid #2f334d;border-radius:10px;padding:16px;margin:14px 0;max-width:900px}}
-.badge{{font-size:12px;padding:2px 8px;border-radius:6px;background:#414868;color:#c0caf5;margin-right:6px}}
-.gold{{color:#9ece6a;font-weight:600}} .stem{{margin:10px 0;font-size:16px}}
-.buzzw{{background:#bb9af7;color:#1a1b26;padding:0 4px;border-radius:4px;font-weight:700}}
-.heard{{color:#c0caf5}} .unheard{{color:#565f89}}
+<title>LeBot — Short-Answer Anticipation</title>
+<link rel=stylesheet href="tokyo-night.css">
+<style>
+body{{background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px}}
+h1{{color:var(--blue);font-size:22px}} .sub{{color:var(--muted);margin-bottom:20px}}
+.card{{background:var(--surface);border:1px solid #2f334d;border-radius:10px;padding:16px;margin:14px 0;max-width:900px}}
+.badge{{font-size:12px;padding:2px 8px;border-radius:6px;background:#414868;color:var(--text);margin-right:6px}}
+.gold{{color:var(--green);font-weight:600}} .stem{{margin:10px 0;font-size:16px}}
+.buzzw{{background:var(--purple);color:var(--bg);padding:0 4px;border-radius:4px;font-weight:700}}
+.heard{{color:var(--text)}} .unheard{{color:var(--muted)}}
 table{{border-collapse:collapse;width:100%;margin-top:8px;font-size:13px}}
 td,th{{text-align:left;padding:3px 8px;border-bottom:1px solid #2f334d}}
-.ok{{color:#9ece6a}} .no{{color:#f7768e}} .unk{{color:#565f89}}
-.bar{{display:inline-block;height:9px;background:#7aa2f7;border-radius:2px;vertical-align:middle}}
+.ok{{color:var(--green)}} .no{{color:var(--red)}} .unk{{color:var(--muted)}}
+.bar{{display:inline-block;height:9px;background:var(--blue);border-radius:2px;vertical-align:middle}}
 .buzzrow{{background:#2a2e45}}
-.tag-correct{{color:#9ece6a}} .tag-wrong{{color:#f7768e}} .tag-abstain{{color:#e0af68}}
+.tag-correct{{color:var(--green)}} .tag-wrong{{color:var(--red)}} .tag-abstain{{color:#e0af68}}
 </style></head><body>
 <h1>LeBot — Short-Answer Anticipation</h1>
 <div class=sub>{n} questions · <span class=tag-correct>{nc} buzzed correct</span> ·

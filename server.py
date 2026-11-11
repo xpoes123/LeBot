@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sklearn.linear_model import LogisticRegression
 
 import answerer
+import jev
 import upload
 from buzzer import load_rows, CATS
 
@@ -25,6 +26,17 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # Train on all data at startup (demo — no held-out split)
 _X, _y, *_ = load_rows()
 _clf = LogisticRegression(max_iter=2000, class_weight="balanced").fit(_X, _y)
+# + Jev's P(correct) as a feature (jev_ab.py: ev/q +0.3, buzzes earlier); _clf is the fallback when Jev is down
+_Xj, _yj, *_ = load_rows(json.load(open(jev.PROBS)))
+_clf_jev = LogisticRegression(max_iter=2000, class_weight="balanced").fit(_Xj, _yj)
+
+
+def _p_buzz(feats, prefix, category, traj):
+    """Calibrated P(buzz now is correct): LR+Jev when Jev answers, else the plain LR."""
+    pj = jev.p_correct(prefix, category, traj)
+    if pj is None:
+        return float(_clf.predict_proba(feats)[0, 1]), None
+    return float(_clf_jev.predict_proba(np.append(feats, [[pj]], axis=1))[0, 1]), pj
 
 BUZZ_T = 0.75  # raised from 0.70 — old threshold was tuned on Haiku-primary data
 
@@ -118,10 +130,10 @@ async def upload_packet(
 
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
-    if req.fast:  # low-latency live path: single Haiku anticipation, no verbose/calc
-        guess, mode = answerer.anticipate_fast(req.prefix, req.category, n=3)
+    if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
+        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=3)
         guess = _mc_letter(guess, req.prefix)
-        buzz = _buzz_features(req, guess, mode, guess)
+        buzz = _buzz_features(req, guess, mode, haiku)  # real cross-model `agrees` drives early-buzz
         return {"guess": guess, "reasoning": "", **buzz}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
@@ -174,7 +186,8 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
     cat_vec = [1.0 if req.category == c else 0.0 for c in CATS]
     feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
                        np.log1p(total), is_calc] + cat_vec])
-    p = float(_clf.predict_proba(feats)[0, 1])
+    traj = [] if is_unk else [(None, g) for g in all_guesses if g and g.upper() != "UNKNOWN"]
+    p, p_jev = _p_buzz(feats, req.prefix, req.category, traj)
     haiku_no_guess = not haiku_guess or haiku_guess.upper() == "UNKNOWN"
     agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and not haiku_no_guess else None
     # Both models have guesses but disagree → penalize confidence
@@ -182,7 +195,7 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
         p *= 0.6
     # Hard gate: Haiku UNKNOWN = stem incomplete, don't buzz regardless of P
     return dict(mode=mode, stability_run=run, churn=churn, frac=round(frac, 3),
-                p_buzz=round(p, 3), buzzes=p >= BUZZ_T and run >= 2 and not haiku_no_guess,
+                p_buzz=round(p, 3), p_jev=p_jev, buzzes=p >= BUZZ_T and run >= 2 and not haiku_no_guess,
                 haiku_vote=haiku_guess, agrees=agrees)
 
 
@@ -247,7 +260,7 @@ def _value_steps(category, words, total, indices):
     with ThreadPoolExecutor(max_workers=min(len(indices), 20)) as ex:
         raw = sorted(ex.map(one, indices), key=lambda r: r["widx"])
 
-    prev_n, run, seen, steps = None, 0, set(), []
+    prev_n, run, seen, steps, traj, jobs = None, 0, set(), [], [], []
     for r in raw:
         guess = r["guess"]
         is_unk = not guess or guess.upper() == "UNKNOWN"
@@ -260,18 +273,21 @@ def _value_steps(category, words, total, indices):
             run, prev_n = 1, ng
         if not is_unk:
             seen.add(ng)
+            traj.append((r["widx"] - 1, guess))
         churn = len(seen)
         frac = r["widx"] / total
         cat_vec = [1.0 if category == c else 0.0 for c in CATS]
         feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
                            np.log1p(total), 1.0 if r["mode"] in ("calc", "seq") else 0.0] + cat_vec])
-        p = float(_clf.predict_proba(feats)[0, 1])
+        jobs.append((feats, " ".join(words[:r["widx"]]), category, [] if is_unk else list(traj)))
+        steps.append({**r, "phase": "stem", "stability_run": run, "churn": churn, "frac": round(frac, 3)})
+    with ThreadPoolExecutor(max_workers=min(len(jobs), 20) or 1) as ex:
+        probs = list(ex.map(lambda j: _p_buzz(*j), jobs))
+    for s, r, (p, p_jev) in zip(steps, raw, probs):
         # buzz when confident (P) AND cross-model confirmed (Haiku independently agrees with
         # Sonnet) — agreement replaces the stability gate: it's a stronger correctness signal
         # and lets a question that only settles on its last word still buzz.
-        steps.append({**r, "phase": "stem", "stability_run": run, "churn": churn,
-                      "frac": round(frac, 3), "p_buzz": round(p, 3),
-                      "buzzes": p >= BUZZ_T and r["agrees"]})
+        s.update(p_buzz=round(p, 3), p_jev=p_jev, buzzes=p >= BUZZ_T and r["agrees"])
     return steps
 
 

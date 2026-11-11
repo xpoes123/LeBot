@@ -60,11 +60,16 @@ def featurize(rec):
     return rows
 
 
-def load_rows():
+def load_rows(jev_probs=None):
+    """jev_probs = {"qid:widx": P} (jev_probs.json) -> appended as the last feature column."""
     data = json.load(open(LABELS))
     rows = []
     for rec in data.values():
-        rows += featurize(rec)
+        feats = featurize(rec)
+        if jev_probs is not None:
+            for r, p in zip(feats, rec["preds"]):
+                r[0].append(jev_probs.get(f"{rec['id']}:{p[0]}", 0.0))
+        rows += feats
     X = np.array([r[0] for r in rows])
     y = np.array([r[1] for r in rows])
     frac = np.array([r[2] for r in rows])

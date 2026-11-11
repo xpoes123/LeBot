@@ -1,0 +1,24 @@
+/* Vendored from xpoes123/toolkit web/tokyo-night.css — canonical source, re-copy manually if it changes */
+/* Tokyo Night Dark — shared CSS custom properties.
+   Extracted from finance/index.html and david-share/app/static/share.css,
+   which had copy-pasted the same hex values under different variable names.
+   This is the canonical source now — <link> it instead of re-pasting hex.
+
+   Scope: personal single-user VPS tools (finance, david-share, future ones)
+   that intentionally match the desktop theme. Public-facing products
+   (scibowl-org) and branded personal sites (davidJ) should NOT use this —
+   see README.md's "Design system" section for why. */
+
+:root {
+  --bg: #1a1b26;
+  --surface: #24283b;
+  --surface-2: #1f2335;
+  --line: #2f3549;
+  --text: #c0caf5;
+  --muted: #565f89;
+  --blue: #7aa2f7;
+  --purple: #bb9af7;
+  --green: #9ece6a;
+  --red: #f7768e;
+  --yellow: #e0af68;
+}

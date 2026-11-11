@@ -10,6 +10,7 @@ No DB, no pandas. ponytail: stdlib csv handles 1.5MB fine.
 import csv
 import json
 import os
+import re
 
 csv.field_size_limit(10_000_000)  # question_text can be long
 
@@ -40,6 +41,35 @@ def load_questions(facts_dir, mc_only=True, tossup_only=True):
                 "options": json.loads(row["options_json"]),
                 "answer": answer,
                 "answer_idx": LETTERS.index(answer),
+            }
+    return out
+
+
+def _clean_gold(s):
+    """Strip LaTeX (\\textbf{..}, pronunciation [..]) but KEEP the (ACCEPT: ..) clause —
+    the semantic judge uses it. Just de-noises the string it reads."""
+    s = re.sub(r"\\[a-zA-Z]+\{([^}]*)\}", r"\1", s)   # \textbf{Retinal} -> Retinal
+    s = re.sub(r"\\\[[^\]]*\]|\[[^\]]*\]", "", s)      # drop [REH-tin-al] pronunciations
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def load_sa_questions(facts_dir, tossup_only=True):
+    """SHORT_ANSWER tossups with a free-text gold answer — the arena for the live SA
+    early-buzz gate (human buzz timing for these lives in buzzes.csv, keyed the same)."""
+    out = {}
+    with open(os.path.join(facts_dir, "questions_meta.csv")) as f:
+        for row in csv.DictReader(f):
+            if row["question_style"] != "SHORT_ANSWER":
+                continue
+            if tossup_only and row["question_type"] != "TOSSUP":
+                continue
+            gold = json.loads(row["correct_answer"])
+            if not isinstance(gold, str) or not gold.strip():
+                continue
+            out[_key(row)] = {
+                "checksum": row["packet_checksum"], "qid": row["question_id"],
+                "category": row["category"], "stem": row["question_text_stripped"],
+                "gold": _clean_gold(gold),
             }
     return out
 

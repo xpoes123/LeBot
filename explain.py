@@ -103,20 +103,22 @@ def render(cards):
     esc = html.escape
     out = ["""<!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>LeBot — How it thinks (walkthrough)</title><style>
-body{background:#1a1b26;color:#c0caf5;font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px}
-h1{color:#7aa2f7}.intro{color:#9aa3b2;max-width:760px;margin-bottom:8px}
-.card{background:#24283b;border:1px solid #2f334d;border-radius:10px;padding:18px;margin:18px 0;max-width:820px}
-.qhead{font-size:13px;color:#565f89;margin-bottom:4px}.gold{color:#9ece6a;font-weight:600}
+<title>LeBot — How it thinks (walkthrough)</title>
+<link rel=stylesheet href="tokyo-night.css">
+<style>
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:24px}
+h1{color:var(--blue)}.intro{color:#9aa3b2;max-width:760px;margin-bottom:8px}
+.card{background:var(--surface);border:1px solid #2f334d;border-radius:10px;padding:18px;margin:18px 0;max-width:820px}
+.qhead{font-size:13px;color:var(--muted);margin-bottom:4px}.gold{color:var(--green);font-weight:600}
 .full{margin:8px 0 14px;color:#a9b1d6}
 .step{border-left:2px solid #2f334d;padding:8px 0 8px 14px;margin:0 0 4px}
-.step.buzz{border-left-color:#bb9af7;background:#2a2e45;border-radius:0 8px 8px 0}
-.heard{color:#7aa2f7;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-.frag{color:#c0caf5}.reason{color:#9aa3b2;font-style:italic;margin:3px 0}
-.commit{margin-top:3px}.ok{color:#9ece6a}.no{color:#f7768e}.unk{color:#565f89}
+.step.buzz{border-left-color:var(--purple);background:#2a2e45;border-radius:0 8px 8px 0}
+.heard{color:var(--blue);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.frag{color:var(--text)}.reason{color:#9aa3b2;font-style:italic;margin:3px 0}
+.commit{margin-top:3px}.ok{color:var(--green)}.no{color:var(--red)}.unk{color:var(--muted)}
 .p{font-variant-numeric:tabular-nums;color:#e0af68}
-.bar{display:inline-block;height:8px;background:#7aa2f7;border-radius:2px;vertical-align:middle;margin-right:6px}
-.buzztag{color:#bb9af7;font-weight:700}
+.bar{display:inline-block;height:8px;background:var(--blue);border-radius:2px;vertical-align:middle;margin-right:6px}
+.buzztag{color:var(--purple);font-weight:700}
 </style></head><body>
 <h1>LeBot — how it thinks, step by step</h1>
 <div class=intro>For each question, every line is one moment as the question is read aloud:
