@@ -3,7 +3,7 @@
 For every (question, prefix) in sa_labels.json, ask Jev "will committing to the
 current guess be judged correct?" -> P(yes). Score on the SAME held-out split as
 buzzer.py: calibration (ECE) + buzz policy (earliest prefix with P>=T). Also tries
-Jev's P as an extra LR feature. Jev answers cache to .cache_jev.json.
+Jev's P as an extra LR feature. Jev answers cache to jev_probs.json.
 
 Run: python jev_ab.py
 """
@@ -12,39 +12,15 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-import requests
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupShuffleSplit
 
 import answerer  # noqa: F401  (loads .env)
 import buzzer
+import jev
 import sa_data
 
-URL = "https://api.typesafe.ai/v1/systemone"
-CACHE = os.path.join(os.path.dirname(__file__), ".cache_jev.json")
-CRITERIA = {
-    "yes": "the guess is the correct answer to the full question (a judge would accept it)",
-    "no": "the guess is wrong, too vague, or the clues so far don't pin the answer down yet",
-}
-
-
-def state(text, cat, traj):
-    hist = "; ".join(f"after {w + 1} words: {g}" for w, g in traj)
-    return (f"National Science Bowl short-answer tossup, category {cat}. The question is being read aloud "
-            f"and has been cut off mid-stream. Heard so far:\n\"{text}\"\n\n"
-            f"A player's guesses so far ({hist}). Their current guess: {traj[-1][1]}")
-
-
-def ask(st):
-    r = requests.post(URL, timeout=15, headers={"Authorization": f"Bearer {os.environ['JEV_API_KEY']}"},
-                      json={"model": "jev-latest", "state": st, "questions": {"ok": {
-                          "type": "choice", "question": "If the player buzzes now with their current guess, "
-                          "will it be judged correct?", "criteria": CRITERIA}}})
-    r.raise_for_status()
-    a = r.json()["answers"]["ok"]
-    if "probabilities" in a:
-        return float(a["probabilities"]["yes"])
-    return a["confidence"] if a["choice"] == "yes" else 1 - a["confidence"]
+CACHE = jev.PROBS
 
 
 def jev_probs():
@@ -60,12 +36,12 @@ def jev_probs():
             traj.append((w, pred))
             k = f"{rec['id']}:{w}"
             if k not in cache:
-                jobs.append((k, state(" ".join(words[: w + 1]), rec["category"], list(traj))))
+                jobs.append((k, jev.state(" ".join(words[: w + 1]), rec["category"], list(traj))))
     print(f"{len(jobs)} Jev calls to make ({len(cache)} cached)")
 
     def work(j):
         try:
-            return j[0], ask(j[1])
+            return j[0], jev.ask(j[1])
         except Exception as e:
             print("  fail", j[0], type(e).__name__)
             return j[0], None
