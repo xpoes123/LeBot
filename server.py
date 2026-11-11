@@ -4,6 +4,7 @@ POST /analyze  {prefix, category, total_words, history:[{guess,mode}]}
 GET  /       -> lebot.html
 """
 import asyncio
+import hmac
 import json
 import os
 import re
@@ -23,6 +24,21 @@ import upload
 from buzzer import load_rows, CATS
 
 app = FastAPI()
+
+PAID = ("/analyze", "/analyze-full", "/analyze-stream", "/relisten")   # endpoints that spend API credit
+
+
+def _key_ok(given: str) -> bool:
+    """LEBOT_KEY (VPS .env) gates the paid endpoints; unset = open (local dev)."""
+    want = os.environ.get("LEBOT_KEY", "")
+    return not want or hmac.compare_digest(given or "", want)
+
+
+@app.middleware("http")
+async def _require_key(request: Request, call_next):
+    if request.url.path in PAID and not _key_ok(request.headers.get("x-lebot-key", "")):
+        return JSONResponse({"error": "missing or wrong key: open the page once with ?key=..."}, status_code=401)
+    return await call_next(request)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Train on all data at startup (demo — no held-out split)
@@ -126,6 +142,8 @@ _DG = ("wss://api.deepgram.com/v1/listen?model=nova-3&interim_results=true&punct
 async def listen(ws: WebSocket):
     """/read's mic relay: browser audio chunks -> Deepgram -> transcript JSON back. The key stays here."""
     import websockets   # only this route needs it
+    if not _key_ok(ws.query_params.get("key", "")):
+        return await ws.close(code=1008)
     await ws.accept()
     key = os.environ.get("DEEPGRAM_API_KEY", "")
     if not key:
