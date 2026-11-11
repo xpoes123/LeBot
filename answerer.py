@@ -303,16 +303,7 @@ def mc_past_y(prefix):
 
 def mc_commit(prefix, category, k=3):
     """Majority of k parallel commits (Opus takes no temperature, so single answers vary); returns once 2 agree."""
-    from concurrent.futures import as_completed
-    ex = ThreadPoolExecutor(max_workers=k)
-    got = []
-    for f in as_completed([ex.submit(_mc_commit_once, prefix, category) for _ in range(k)]):
-        got.append(f.result())
-        if got.count(got[-1]) >= 2:
-            ex.shutdown(wait=False)
-            return got[-1]
-    ex.shutdown(wait=False)
-    return Counter(got).most_common(1)[0][0]
+    return _vote_in_time([lambda: _mc_commit_once(prefix, category)] * k, budget=1.6) or "Z"
 
 
 def _mc_commit_once(prefix, category):
@@ -365,18 +356,37 @@ QUICK_MODEL = "claude-opus-4-8"   # 17/21 calc tossups, median 1.3 s / p90 1.7 s
 def quick_compute(prefix, category, k=3, bet=False):
     """Answer a computational tossup inside the ~2 s answer window: k parallel Opus solves, majority value
     (one solve is right ~75% of the time on the springs question; wall time ~= one solve)."""
-    from concurrent.futures import as_completed
-    ex = ThreadPoolExecutor(max_workers=k)
-    vals = []
-    for f in as_completed([ex.submit(_quick_once, prefix, category, bet) for _ in range(k)]):
-        v = f.result()
-        if v and v.upper() != "UNKNOWN":
-            vals.append(v)
-            if sum(_norm_ans(x) == _norm_ans(v) for x in vals) >= 2:   # two agree: answer now, don't wait
-                ex.shutdown(wait=False)
-                return v
-    ex.shutdown(wait=False)
-    return _vote(vals) if vals else "UNKNOWN"
+    return _vote_in_time([lambda: _quick_once(prefix, category, bet)] * k, budget=1.8) or "UNKNOWN"
+
+
+def _vote_in_time(calls, budget):
+    """Run the calls in parallel; return as soon as two answers agree, else at `budget` seconds the most common answer
+    so far (the answer window is ~2 s — a slow third vote must not sink it). Waits past the budget only if nothing
+    has come back yet. UNKNOWN/empty answers don't count."""
+    import time
+    from concurrent.futures import FIRST_COMPLETED, wait
+    ex = ThreadPoolExecutor(max_workers=len(calls))
+    pending, got, t0 = {ex.submit(c) for c in calls}, [], time.monotonic()
+    try:
+        while pending:
+            left = budget - (time.monotonic() - t0)
+            # within budget: wait up to the deadline; past it: done if we have an answer, else wait for the first one
+            timeout = left if left > 0 else (0 if got else None)
+            done, pending = wait(pending, timeout=timeout, return_when=FIRST_COMPLETED)
+            for f in done:
+                try:
+                    v = f.result()
+                except Exception:
+                    continue
+                if v and v.upper() != "UNKNOWN":
+                    got.append(v)
+                    if sum(_norm_ans(x) == _norm_ans(v) for x in got) >= 2:
+                        return v
+            if got and time.monotonic() - t0 >= budget:
+                break
+        return max(got, key=lambda v: sum(_norm_ans(x) == _norm_ans(v) for x in got)) if got else None
+    finally:
+        ex.shutdown(wait=False)
 
 
 def _norm_ans(v):
