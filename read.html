@@ -167,7 +167,8 @@ async function tick(n, my) {
       if (d.mode === 'calc-ready') {   // buzzed on readiness: compute the answer now, inside the window
         const t = performance.now();
         answerBoth(my, true, (g, how) => {
-          if (!buzzed || buzzed.over || $('grade').hidden === false) return;
+          if (!buzzed || buzzed.over || ($('grade').hidden === false && !buzzed.late)) return;
+          buzzed.late = false;
           buzzed.guess = g; $('buzz').textContent = 'BUZZ — ' + g; $('buzzat').textContent += ` · computed ${g} (${how})`;
         });
       }
@@ -240,6 +241,10 @@ async function endQuestion() {
 }
 
 function finish() {
+  if (buzzed && buzzed.guess === '…') {   // window closed with no answer yet: never leave a buzz unanswered —
+    buzzed.late = true;                   // the first answer that arrives is shown (marked late)
+    $('buzzat').textContent += ' · window closed, waiting for the answer…';
+  }
   stopMic();
   $('grade').hidden = false;
   $('end').disabled = true;
@@ -294,7 +299,8 @@ async function startMic() {
       doBuzz('…', n, my);
       const t = performance.now();
       answerBoth(my, false, (g, how) => {
-        if (!buzzed || buzzed.over || $('grade').hidden === false) return;
+        if (!buzzed || buzzed.over || ($('grade').hidden === false && !buzzed.late)) return;
+        buzzed.late = false;
         buzzed.guess = g; $('buzz').textContent = 'BUZZ — ' + g; $('buzzat').textContent += ` · answered ${g} (${how})`;
       });
       return;
