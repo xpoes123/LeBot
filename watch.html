@@ -42,7 +42,8 @@
 <main>
   <h1>Watch LeBot play</h1>
   <p class="sub">A held-out Stanford tossup (the buzz gate never trained on it) read at live speed. Every 3 words it
-    asks the live fast path; it buzzes where the reply actually lands, latency included.</p>
+    asks the live fast path: Sonnet keeps a running guess, Jev decides when to buzz (where the reply lands,
+    latency included), then Sonnet gets the ~2 s answer window.</p>
 
   <div class="bar">
     <button id="go">▶ Read a question</button>
@@ -60,7 +61,7 @@
     <div class="card">
       <div class="k">current guess</div>
       <div class="v" id="guess">—</div>
-      <div class="k" style="margin-top:8px">P(correct) <span id="pv">—</span> · threshold <span id="tv">—</span> · Haiku agrees <span id="ag">—</span></div>
+      <div class="k" style="margin-top:8px">Jev P(buzz) <span id="pv">—</span> · threshold <span id="tv">—</span> · Haiku agrees <span id="ag">—</span></div>
       <div class="meter"><i id="pm"></i><b id="tm" style="left:80%"></b></div>
     </div>
     <div class="card">
@@ -136,7 +137,21 @@ async function play() {
       $('buzz').textContent = 'BUZZ — ' + d.guess; $('buzz').className = 'on';
       $('buzzat').textContent = `decided on ${n} words, landed at word ${heard} of ${words.length} (${Math.round(heard / words.length * 100)}%)`;
       const el = $('w' + Math.max(0, heard - 1)); if (el) el.classList.add('bot');
+      finalSolve(words.slice(0, heard).join(' '), 2000).then(f => {   // Sonnet's ~2 s answer window
+        if (my !== run) return;
+        if (f.guess && f.inTime) { buzzed.guess = f.guess; $('buzz').textContent = 'BUZZ — ' + f.guess; }
+        $('buzzat').textContent += f.inTime ? ` · final answer in ${f.ms} ms: ${f.guess || '—'}` : ` · full solve took ${f.ms} ms (> 2 s), kept the quick answer`;
+      });
     }
+  }
+  async function finalSolve(prefix, windowMs) {
+    const t0 = performance.now();
+    try {
+      const f = await (await fetch('/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prefix, category: q.category, total_words: prefix.split(/\s+/).length, history: [] }) })).json();
+      const ms = Math.round(performance.now() - t0);
+      return { guess: f.guess && f.guess.toUpperCase() !== 'UNKNOWN' ? f.guess : '', ms, inTime: ms <= windowMs };
+    } catch (e) { return { guess: '', ms: Math.round(performance.now() - t0), inTime: false }; }
   }
 
   let heard = 0;
@@ -151,6 +166,13 @@ async function play() {
   if (heard % 3 !== 0) tick(heard);
   await new Promise(r => setTimeout(r, 1500));   // let the last replies land
   if (my !== run) return;
+  let endAns = null;
+  if (!buzzed) {   // like live: no early buzz -> answer when the reader finishes
+    $('buzz').textContent = 'end of question — solving…';
+    endAns = await finalSolve(q.stem, 1e9);
+    if (my !== run) return;
+    $('buzz').textContent = 'answered at end: ' + (endAns.guess || 'UNKNOWN');
+  }
 
   // reveal: answer + where the humans in the room buzzed
   q.buzzes.forEach(b => { const el = $('w' + Math.min(b.w, words.length - 1)); if (el) el.classList.add(b.ok ? 'hum' : 'humx'); });
@@ -159,7 +181,7 @@ async function play() {
   const right = buzzed && (norm(buzzed.guess) === norm(q.gold) || norm(q.gold).includes(norm(buzzed.guess)) || norm(buzzed.guess).includes(norm(q.gold)));
   $('verdict').innerHTML = (buzzed
       ? `Bot buzzed <b>${buzzed.guess}</b> at ${Math.round(buzzed.at / words.length * 100)}% — <span class="${right ? 'ok' : 'bad'}">${right ? 'looks right' : 'check vs answer'}</span>`
-      : 'Bot never buzzed (abstained).')
+      : `No early buzz; answered at the end: <b>${endAns && endAns.guess || 'UNKNOWN'}</b> (${endAns ? endAns.ms : '—'} ms).`)
     + `<br>Fastest correct human: ${fast ? Math.round(fast.w / words.length * 100) + '% (word ' + (fast.w + 1) + ')' : 'none in-stem'}`
     + ` · ${q.buzzes.length} in-stem human buzzes, ${q.buzzes.filter(b => b.ok).length} correct`;
   $('result').style.display = 'block';

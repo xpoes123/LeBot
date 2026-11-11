@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from sklearn.linear_model import LogisticRegression
 
 import answerer
-import gate
 import jev
 import upload
 from buzzer import load_rows, CATS
@@ -155,7 +154,7 @@ def analyze(req: AnalyzeReq):
         guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=1)
         guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, haiku)
-        return {"guess": guess, "reasoning": "", **buzz, **_gate(req, guess, buzz)}
+        return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz)}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
     with ThreadPoolExecutor(max_workers=2) as ex:
@@ -187,15 +186,15 @@ def _reason_text(mode, reasoning):
     return reasoning
 
 
-def _gate(req: AnalyzeReq, guess: str, buzz: dict):
-    """The live early-buzz decision (gate.py: trained on this exact fast path, validated on unseen tournaments)."""
-    h = req.history
-    rec = {"seq": [[s.guess, s.agrees] for s in h] + [[guess, bool(buzz["agrees"])]],
-           "idx": [max(s.words, 1) - 1 for s in h] + [len(req.prefix.split()) - 1],
-           "category": req.category, "jev": [None] * len(h) + [buzz["p_jev"]]}
-    p, T = gate.p_correct(rec, len(h))
+JEV_T = 0.8   # held out (563 Qs): buzz@~70% of stem, ~78% acc — human in-stem buzzes: 65-69%, 69-81%
+
+
+def _gate(guess: str, buzz: dict):
+    """The live buzz decision is Jev's alone: P(Sonnet's running guess is right, given the question so far).
+    Sonnet then gets the ~2 s answer window to finalize (live.py)."""
+    p = buzz["p_jev"]
     named = bool(guess and guess.upper() != "UNKNOWN")
-    return {"p_gate": round(p, 3), "gate_T": T, "gate_buzz": named and p >= T}
+    return {"p_gate": p, "gate_T": JEV_T, "gate_buzz": named and p is not None and p >= JEV_T}
 
 
 def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
