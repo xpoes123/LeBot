@@ -4,3 +4,4 @@ uvicorn
 python-multipart
 numpy
 scikit-learn
+requests
