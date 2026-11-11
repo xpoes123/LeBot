@@ -418,7 +418,8 @@ def is_computational(prefix, category):
         re.search(r"\d", prefix) or len(_NUMBER_WORDS.findall(prefix)) >= 2)
 
 
-_ASKED = re.compile(r"(?i)\b(what|which|who|whom|whose|how|why|when|where|name|identify|give|find|calculate|"
+# no when/where/why: in a tossup they start subordinate clauses ("when plotted on the eightfold way"), not the ask
+_ASKED = re.compile(r"(?i)\b(what|which|who|whom|whose|how|name|identify|give|find|calculate|"
                     r"compute|determine|estimate|express|provide|state)\b|\b(this|these)\s+[a-z]")
 
 
@@ -595,7 +596,10 @@ def _parrots_stem(ans, prefix):
     a = _norm(ans)
     if not a or a == "unknown" or len(a.split()) < 2:
         return False
-    return a in _norm(prefix)
+    p = _norm(prefix)
+    # also a guess that COMPLETES the phrase being read ("...plotted on the eightfold" -> "Eightfold Way"): held out,
+    # 11 such guesses, 0 right; a live rehearsal buzzed one at Jev 0.82 (-4)
+    return a in p or a.split()[0] == p.split()[-1]
 
 
 def _list_prior_guess(ans, prefix):
