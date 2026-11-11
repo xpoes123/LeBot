@@ -117,7 +117,8 @@ def _log_locked(q, ans, why, mode, cat):
 
 PRECOMP_MIN = 8       # start trying an answer once the question is a bit under way
 PRECOMP_STEP = 5      # words of new speech between full-accuracy answer attempts
-THINK_STEP = 3        # words between fast "leaning" updates (keep a fresh answer ready for End)
+THINK_STEP = 1        # words between fast checks (Sonnet guess + Jev buzz call); they overlap
+THINK_MAX = 3         # fast checks in flight at once (~0.85 s each vs ~0.37 s per word)
 END_TIMEOUT = 18.0    # hard cap on the final solve (Opus-retry math can be ~12s); then fall back
 ANSWER_WINDOW = 2.0   # after an early buzz, Sonnet has ~2 s (NSB) to finalize before we must answer
 
@@ -254,6 +255,7 @@ async def _run(ws, client):
         named = bool(g and g.upper() != "UNKNOWN")
         if d and state["gen"] == gen:   # every tick, UNKNOWN too: it resets the gate's runs as in training
             leans.append({"guess": g or "UNKNOWN", "mode": "recall", "agrees": bool(d.get("agrees")), "words": words})
+            leans.sort(key=lambda h: h["words"])   # overlapping checks can land out of order
         with _lock:
             if state["gen"] == gen and named:
                 state["thinking"] = g
@@ -321,11 +323,11 @@ async def _run(ws, client):
                 nopts = len(set(re.findall(r"\b[wxyz]\b", qtext.lower())))
                 if nopts > seen_opts:
                     seen_opts, new_option = nopts, True
-            if (nwords >= last_think + THINK_STEP or new_option) and not think_inflight:
+            if (nwords >= last_think + THINK_STEP or new_option) and len(think_inflight) < THINK_MAX:
                 last_think = nwords
-                think_inflight.add(1)
                 t = asyncio.create_task(confirm(qtext, nwords, my_gen, state["category"]))
-                t.add_done_callback(lambda _: think_inflight.discard(1))
+                think_inflight.add(t)
+                t.add_done_callback(think_inflight.discard)
             if (((nwords >= PRECOMP_MIN and nwords >= last_full + PRECOMP_STEP)
                  or (new_option and nwords >= PRECOMP_MIN)) and not full_inflight
                     and not committed):

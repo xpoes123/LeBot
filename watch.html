@@ -41,7 +41,7 @@
 <body>
 <main>
   <h1>Watch LeBot play</h1>
-  <p class="sub">A held-out Stanford tossup (the buzz gate never trained on it) read at live speed. Every 3 words it
+  <p class="sub">A held-out Stanford tossup (the buzz gate never trained on it) read at live speed. Every word (up to 3 checks overlapping) it
     asks the live fast path: Sonnet keeps a running guess, Jev decides when to buzz (where the reply lands,
     latency included), then Sonnet gets the ~2 s answer window.</p>
 
@@ -112,6 +112,10 @@ async function play() {
   }
 
   async function tick(n) {
+    inflight++;
+    try { await tick1(n); } finally { inflight--; }
+  }
+  async function tick1(n) {
     const t0 = performance.now();
     let d;
     try {
@@ -154,16 +158,16 @@ async function play() {
     } catch (e) { return { guess: '', ms: Math.round(performance.now() - t0), inTime: false }; }
   }
 
-  let heard = 0;
+  let heard = 0, inflight = 0;
   const step = 1000 / wps;
   for (let i = 0; i < words.length; i++) {
     if (my !== run) return;
     heard = i + 1;
     $('w' + i).classList.add('heard');
-    if (heard >= 3 && heard % 3 === 0) tick(heard);
+    if (heard >= 3 && inflight < 3) tick(heard);   // every word, up to 3 checks overlapping (as live)
     await new Promise(r => setTimeout(r, step));
   }
-  if (heard % 3 !== 0) tick(heard);
+  tick(heard);
   await new Promise(r => setTimeout(r, 1500));   // let the last replies land
   if (my !== run) return;
   let endAns = null;
