@@ -211,7 +211,9 @@ def analyze(req: AnalyzeReq):
         if req.final and not answerer.is_mc(req.prefix) and (
                 answerer.is_computational(req.prefix, req.category)
                 or (jev.qtype_ready(req.prefix, req.category)[0] or 0) >= 0.5):
-            guess = answerer.quick_compute(req.prefix, req.category)
+            # full send may have buzzed before the ask: bet on the most likely asked quantity (MLE)
+            guess = answerer.quick_compute(req.prefix, req.category,
+                                           bet=req.mode == "full" and not answerer.asked_yet(req.prefix))
             return {"guess": guess, "reasoning": "", "mode": "quick-compute", "agrees": None, "p_jev": None,
                     "p_gate": None, "gate_T": None, "gate_buzz": False}
         if answerer.mc_past_y(req.prefix):
@@ -223,7 +225,7 @@ def analyze(req: AnalyzeReq):
         mc = answerer.is_mc(req.prefix)
         # Jev first (~0.1 s): a calculation needs no running guess, so answer at Jev speed and skip Sonnet's ~1 s
         # (and its tokens) — only recall tossups pay for the guess.
-        p_calc, ready = jev.qtype_ready(req.prefix, req.category) if not mc else (None, None)
+        p_calc, ready, setup = jev.qtype_ready(req.prefix, req.category) if not mc else (None, None, None)
         guess = haiku = mode = None
         if p_calc is None:   # Jev down: fall back to "numbers present"
             p_calc = 1.0 if (not mc and answerer.is_computational(req.prefix, req.category)) else 0.0
@@ -235,6 +237,8 @@ def analyze(req: AnalyzeReq):
             # the answer (final=true -> Opus quick-compute x3 in the window)
             t = CALC_T.get(req.mode, 0.8)
             fire = ready is not None and ready >= t
+            if req.mode == "full" and not fire and setup is not None and setup >= SETUP_T:
+                ready, fire = setup, True   # full send: bet on the most likely ask (held out: 52% right @ ~67%)
             return {"guess": "…" if fire else "UNKNOWN", "reasoning": "", "mode": "calc-ready" if fire else "calc-wait",
                     "agrees": None, "p_jev": ready, "p_calc": round(p_calc, 2), "p_gate": ready, "gate_T": t,
                     "gate_buzz": fire}
@@ -280,6 +284,7 @@ def _reason_text(mode, reasoning):
 MODES = {"full": (0.6, True, False), "balanced": (0.8, True, False), "confident": (0.8, False, True)}
 
 
+SETUP_T = 0.3            # full send: buzz once the calc setup is complete, before the ask
 CALC_T = {"full": 0.5}   # calc readiness threshold per mode (default 0.8)
 PRE_ASK_T = 0.95   # before the question asks anything, only near-certain buzzes (balanced/confident)
 
