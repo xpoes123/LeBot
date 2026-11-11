@@ -93,6 +93,24 @@ def index():
     return HTMLResponse(Path("lebot.html").read_text())
 
 
+@app.get("/watch")
+def watch():
+    return HTMLResponse(Path("watch.html").read_text())
+
+
+@app.get("/tokyo-night.css")
+def tokyo_css():
+    return HTMLResponse(Path("tokyo-night.css").read_text(), media_type="text/css")
+
+
+_watch = json.loads(Path("watch_questions.json").read_text())   # held-out Stanford SA tossups + human buzzes
+
+
+@app.get("/questions/watch")
+def watch_questions():
+    return {"questions": _watch}
+
+
 @app.get("/questions/nsba4")
 def nsba4_questions():
     return {"questions": _nsba4}
