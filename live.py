@@ -119,6 +119,7 @@ PRECOMP_MIN = 8       # start trying an answer once the question is a bit under 
 PRECOMP_STEP = 5      # words of new speech between full-accuracy answer attempts
 THINK_STEP = 3        # words between fast "leaning" updates (keep a fresh answer ready for End)
 END_TIMEOUT = 18.0    # hard cap on the final solve (Opus-retry math can be ~12s); then fall back
+ANSWER_WINDOW = 2.0   # after an early buzz, Sonnet has ~2 s (NSB) to finalize before we must answer
 
 
 def _capture():
@@ -198,8 +199,8 @@ async def _run(ws, client):
     async def answer_now(qtext, gen, cat, interrupt=False, commit=False):
         # Show a quick answer INSTANTLY — the confident rolled solve if we have one, else the
         # live lean — then finalize with a considered solve in the background. `commit`=early
-        # buzz: we already hold a cross-model-confirmed answer, so it is deliverable now and the
-        # background solve may only ENRICH the reasoning, never change the answer the human buzzed on.
+        # buzz (Jev decided): the running guess is shown at once; a full solve landing inside the
+        # ~2 s answer window replaces it, a later one only enriches the reasoning.
         quick = pre["answer"] if (pre["answer"] and pre["answer"].upper() != "UNKNOWN") \
             else state.get("thinking")
         have_pre_reason = bool(quick and quick == pre["answer"])
@@ -210,17 +211,22 @@ async def _run(ws, client):
                              resmode=(pre["mode"] if have_pre_reason else ""),
                              refining=True, mode="waiting", buzz=commit)
 
+        t_buzz = time.monotonic()
+
         async def finalize():
             try:
                 d = await asyncio.wait_for(_full_call(client, qtext, cat), END_TIMEOUT)
             except Exception:
                 d = None
+            in_window = time.monotonic() - t_buzz <= ANSWER_WINDOW
             g = (d or {}).get("guess", "")
             with _lock:
                 if state["gen"] != gen:
                     return
-                if commit:
-                    # committed answer is locked; only fill in the walkthrough once it lands
+                if commit and in_window and g and g.upper() != "UNKNOWN":
+                    state.update(answer=g, reasoning=d.get("reasoning", ""), resmode=d.get("mode", ""))
+                elif commit:
+                    # past the answer window: the spoken answer is locked; only fill in the walkthrough
                     if d and d.get("reasoning"):
                         state.update(reasoning=d["reasoning"], resmode=d.get("mode", state["resmode"]))
                 elif g and g.upper() != "UNKNOWN":
@@ -234,9 +240,8 @@ async def _run(ws, client):
         asyncio.create_task(finalize())
 
     async def confirm(qtext, words, gen, cat):
-        # The live lean AND the early-buzz decision. Hits the fast path (Sonnet lean +
-        # independent Haiku confirm). Shows the running lean; when the SAME answer comes back
-        # cross-model-confirmed BUZZ_RUN ticks in a row, commit — we hold the answer already.
+        # The live lean AND the early-buzz decision: the fast path returns Sonnet's running guess
+        # and Jev's call on it (gate_buzz). Jev says buzz -> commit; Sonnet finalizes in the window.
         nonlocal conf_norm, conf_run, committed, answered, answered_words
         try:
             d = (await client.post(f"{LEBOT_URL}/analyze", json={
@@ -258,7 +263,7 @@ async def _run(ws, client):
         # commit to a letter mid-stem — that path keeps the existing per-option behavior.
         if (d.get("gate_buzz", conf_run >= BUZZ_RUN) and state["gen"] == gen and not committed and words >= 3
                 and "multiple" not in state["qformat"]):
-            pre.update(words=words, answer=g, reasoning=d.get("reasoning", "") or "cross-model confirmed",
+            pre.update(words=words, answer=g, reasoning=d.get("reasoning", "") or "Jev: buzz",
                        mode=d.get("mode", "recall"))
             committed, answered, answered_words = True, True, words
             await answer_now(qtext, gen, cat, commit=True)
