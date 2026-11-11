@@ -39,3 +39,11 @@ def test_no_history_and_pre_ask_guard(monkeypatch):
     assert not d["gate_buzz"] and d["gate_T"] == server.PRE_ASK_T
     assert server._latest_guess(_req("a b c", [])) is None
     assert server._latest_guess(_req(" ".join("w" * 20), [(3, "old")])) is None   # too far behind to trust
+
+
+def test_calc_readiness_only_buzzes_mid_read_in_full_send(monkeypatch):
+    monkeypatch.setattr(server.jev, "qtype_ready", lambda *a, **k: (1.0, 0.98, 0.9))
+    q = "What is the value of 43 squared"   # a mid-sentence pause read as a complete question
+    for mode, want in (("balanced", "calc-wait"), ("confident", "calc-wait"), ("full", "calc-ready")):
+        d = server.analyze(server.AnalyzeReq(prefix=q, category="MATH", fast=True, mode=mode))
+        assert d["mode"] == want and d["gate_buzz"] == (mode == "full"), (mode, d)

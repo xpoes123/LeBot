@@ -134,7 +134,7 @@ def read_page():
 LISTEN_MAX_S = 180   # one /read question; caps Deepgram spend on this public endpoint
 # nova-3: TTS-read tossups, word lag median 0.60 s / p90 1.4 s vs nova-2 0.94 / 2.8 s, WER 14% vs 16%
 _DG = ("wss://api.deepgram.com/v1/listen?model=nova-3&interim_results=true&punctuate=true"
-       "&smart_format=true&endpointing=800"   # container (webm/opus) is auto-detected
+       "&smart_format=true&endpointing=500"   # container (webm/opus) is auto-detected; 0.5 s pause -> speech_final
        + "".join(f"&keyterm={k}" for k in ("W", "X", "Y", "Z", "toss-up", "multiple%20choice",
                                             "short%20answer")))   # hear the choice letters
 
@@ -307,7 +307,7 @@ def analyze(req: AnalyzeReq):
                                                bet=req.mode == "full" and not answerer.asked_yet(req.prefix))
                 return {"guess": guess, "reasoning": "", "mode": "quick-compute", "agrees": None, "p_jev": None,
                         "p_gate": None, "gate_T": None, "gate_buzz": False}
-            t = CALC_T.get(req.mode, 0.8)
+            t = CALC_T.get(req.mode, 1.01)
             fire = ready is not None and ready >= t
             if req.mode == "full" and not fire and setup is not None and setup >= SETUP_T:
                 ready, fire = setup, True   # full send: bet on the most likely ask (held out: 52% right @ ~67%)
@@ -357,7 +357,11 @@ MODES = {"full": (0.6, True, False), "balanced": (0.8, True, False), "confident"
 
 
 SETUP_T = 0.3            # full send: buzz once the calc setup is complete, before the ask
-CALC_T = {"full": 0.5}   # calc readiness threshold per mode (default 0.8)
+# calc readiness threshold per mode. Balanced/confident never buzz on readiness mid-read: the client buzzes at the
+# sentence's end ("?" + pause) and computes there. Rehearsal: "What is the value of 43 squared" read 0.98 ready on a
+# mid-sentence pause ("... minus 33 squared" was still coming) -> 1849. Held out, readiness fires late anyway (springs:
+# word 44/46), so this costs ~nothing; full send keeps the gamble (readiness >= 0.5, setup-complete MLE bets).
+CALC_T = {"full": 0.5, "balanced": 1.01, "confident": 1.01}
 PRE_ASK_T = 0.95   # before the question asks anything, only near-certain buzzes (balanced/confident)
 
 
