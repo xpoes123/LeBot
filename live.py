@@ -264,7 +264,7 @@ async def _run(ws, client):
                 _log_locked(qtext, state["answer"], state["reasoning"], state["resmode"], cat)
         asyncio.create_task(finalize())
 
-    async def mc_buzz(qtext, words, gen, cat):
+    async def mc_buzz(qtext, words, gen, cat, final=False):
         # MC past Y (answerer.mc_past_y, a pattern check, no API): buzz at once; the answer — and the overread
         # re-answer — land inside the 2 s window.
         nonlocal committed, answered, answered_words
@@ -274,13 +274,14 @@ async def _run(ws, client):
                 state.update(answer="…", buzz=True, mode="waiting", refining=True)
         try:
             d = (await client.post(f"{LEBOT_URL}/analyze", json={
-                "prefix": qtext, "category": cat or "OTHER", "fast": True, "mode": MODE,
+                "prefix": qtext, "category": cat or "OTHER", "fast": True, "mode": MODE, "final": final,
                 "total_words": est_total(words), "history": leans})).json()
         except Exception:
             d = {}
         g = d.get("guess", "")
-        if g and g.upper() != "UNKNOWN":
-            pre.update(words=words, answer=g, reasoning="buzzed after Y", mode="mc-commit")
+        if g and g.upper() != "UNKNOWN" and g != "…":
+            pre.update(words=words, answer=g, reasoning="buzzed after Y" if not final else "computed",
+                       mode=d.get("mode", "mc-commit"))
         await answer_now(qtext, gen, cat, commit=True)
 
     async def confirm(qtext, words, gen, cat):
@@ -306,6 +307,10 @@ async def _run(ws, client):
         conf_norm, conf_run = _confirm_run(conf_norm, conf_run, norm, bool(d.get("agrees")))
         # short-answer only: for W/X/Y/Z MC the choices are read AFTER the stem, so we can't
         # commit to a letter mid-stem — that path keeps the existing per-option behavior.
+        if d.get("mode") == "calc-ready" and d.get("gate_buzz") and state["gen"] == gen and not committed:
+            committed = True   # buzz on readiness; the answer is computed inside the window
+            await mc_buzz(qtext, words, gen, cat, final=True)
+            return
         if (d.get("gate_buzz", conf_run >= BUZZ_RUN) and state["gen"] == gen and not committed and words >= 3
                 and "multiple" not in state["qformat"]):
             pre.update(words=words, answer=g, reasoning=d.get("reasoning", "") or "Jev: buzz",

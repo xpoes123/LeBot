@@ -127,7 +127,17 @@ async function tick(n, my) {
     latest = n;
     $('guess').textContent = d.guess || '—';
     $('pv').textContent = d.p_gate ?? '—'; $('tv').textContent = d.gate_T ?? '—'; $('ag').textContent = d.agrees ? 'yes' : 'no';
-    if (d.gate_buzz && !buzzed && !ended && n >= 3) doBuzz(d.guess, n, my);
+    if (d.gate_buzz && !buzzed && !ended && n >= 3) {
+      doBuzz(d.guess, n, my);
+      if (d.mode === 'calc-ready') {   // buzzed on readiness: compute the answer now, inside the window
+        const t = performance.now();
+        analyze(words().join(' '), true, null, true).then(f => {
+          if (my !== gen || !buzzed || buzzed.over || !f.guess || f.guess.toUpperCase() === 'UNKNOWN') return;
+          buzzed.guess = f.guess; $('buzz').textContent = 'BUZZ — ' + f.guess;
+          $('buzzat').textContent += ` · computed ${f.guess} at ${Math.round(performance.now() - t)} ms`;
+        }).catch(() => {});
+      }
+    }
   } catch (e) {
   } finally { inflight--; }
 }
@@ -161,7 +171,7 @@ function doBuzz(guess, decidedAt, my) {
       $('buzzat').textContent += ` · overread to word ${n2}, answered at ${ms} ms`;
     } catch (e) {}
   }, 1000);
-  setTimeout(() => { if (my === gen) finish(); }, 2100);   // answer window closes
+  setTimeout(() => { if (my === gen) finish(); }, 2600);   // answer window closes (+ recognition slack)
 }
 
 async function endQuestion() {
