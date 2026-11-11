@@ -172,6 +172,7 @@ def gates(rec, T):
         runs.append(run)
     eg = end_answer(rec)
     return {"agree x2 (live now)": first_fire(rec, lambda i: runs[i] >= BUZZ_RUN),
+            "agree x1": first_fire(rec, lambda i: agree[i]),
             f"P>={T}": first_fire(rec, lambda i: p[i] >= T, JEV_S),
             f"P>={T} & agree": first_fire(rec, lambda i: p[i] >= T and agree[i], JEV_S),
             "end of stem": (rec["nwords"], eg) if eg else (None, None)}
@@ -278,7 +279,7 @@ if __name__ == "__main__":
         per_set[name] = items
 
     tune, *tests = list(per_set)
-    best = max((0.6, 0.7, 0.8, 0.9), key=lambda T: max(
+    best = max((0.4, 0.5, 0.6, 0.7, 0.8, 0.9), key=lambda T: max(
         a["ev"] for k, a in evaluate(per_set[tune], T, is_correct).items() if k.startswith("P")))
     print(f"\nT tuned on {tune}: {best}   (reading speed {WPS} words/s, measured per-call latency)")
     print_report(f"TUNE  {tune} (n={len(per_set[tune])})", evaluate(per_set[tune], best, is_correct))
