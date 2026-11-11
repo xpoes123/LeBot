@@ -90,6 +90,11 @@ def _confirm_run(prev_norm, prev_run, norm, agrees):
     return norm, 1
 
 
+def est_total(words):
+    """Live can't know a question's length until it ends; the buzzer's `frac` feature uses this guess."""
+    return max(40, words * 2)
+
+
 BUZZ_RUN = 2   # consecutive cross-model-confirmed ticks on one answer before we commit (buzz)
 
 
@@ -163,10 +168,12 @@ async def _run(ws, client):
     think_inflight, full_inflight = set(), set()
     pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
     conf_norm, conf_run, committed = None, 0, False   # cross-model-confirmed run; early-buzz fired?
+    leans = []   # this question's named fast guesses, oldest first -> server history (buzzer + Jev trajectory)
 
     def reset_reading():
         nonlocal reading, finals, interim, last_think, last_full, pre, answered, answered_words, seen_opts
         nonlocal conf_norm, conf_run, committed
+        leans.clear()
         reading, finals, interim, last_think, last_full = False, [], "", 0, 0
         answered, answered_words, seen_opts = False, 0, 0
         conf_norm, conf_run, committed = None, 0, False
@@ -234,11 +241,14 @@ async def _run(ws, client):
         try:
             d = (await client.post(f"{LEBOT_URL}/analyze", json={
                 "prefix": qtext, "category": cat or "OTHER", "fast": True,
-                "total_words": max(40, words * 2), "history": []})).json()
+                "total_words": est_total(words),
+                "history": [{"guess": g, "mode": "recall"} for g in leans]})).json()
         except Exception:
             d = {}
         g = d.get("guess", "")
         named = bool(g and g.upper() != "UNKNOWN")
+        if named and state["gen"] == gen:
+            leans.append(g)
         with _lock:
             if state["gen"] == gen and named:
                 state["thinking"] = g
