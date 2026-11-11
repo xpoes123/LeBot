@@ -154,16 +154,26 @@ async def listen(ws: WebSocket):
         pass
 
 
+RELISTEN_MAX = 2_000_000   # ~2 min of browser opus; a tossup is ~15 s (~130 KB)
+
+
 @app.post("/relisten")
 async def relisten(request: Request):
     """/read's answer step: re-transcribe the question's audio so far in batch mode. With the whole clip as context
     Deepgram fixes what streaming dropped or garbled ("y, fetch" streamed as "y, z"). ~0.2-0.5 s; capped at 1.2 s so
     the 2 s answer window survives — "" means use the streaming text."""
     import httpx
-    audio = await request.body()
     key = os.environ.get("DEEPGRAM_API_KEY", "")
-    if not key or not audio or len(audio) > 5_000_000:
+    if not key or int(request.headers.get("content-length") or 0) > RELISTEN_MAX:
         return {"text": ""}
+    audio = bytearray()
+    async for chunk in request.stream():   # enforce the cap while reading, not after buffering it all
+        audio += chunk
+        if len(audio) > RELISTEN_MAX:
+            return {"text": ""}
+    if not audio:
+        return {"text": ""}
+    audio = bytes(audio)
     try:
         async with httpx.AsyncClient(timeout=1.2) as c:
             r = await c.post("https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true"
