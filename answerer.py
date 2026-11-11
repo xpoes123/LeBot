@@ -336,7 +336,7 @@ def _calc(code):
     return ns.get("answer")
 
 
-def solve(prefix, category, use_opus=False):
+def solve(prefix, category, use_opus=False, anticipate=False):
     """If `prefix` is a computational question with all numbers present, COMPUTE the
     answer (model writes Python -> we execute it). Returns a formatted answer, or None
     if it's not computational / numbers missing / code failed.
@@ -354,7 +354,10 @@ def solve(prefix, category, use_opus=False):
         "obvious), write Python that assigns the result to `answer`, using "
         "fractions.Fraction for exact ratios. Output ONLY a ```python code block. "
         "If it is not computational, or required numbers are missing/ambiguous, output "
-        "exactly NOTCOMPUTABLE.",
+        "exactly NOTCOMPUTABLE."
+        + (" If it is cut off BEFORE saying what to compute but the givens make the asked quantity "
+           "obvious (e.g. a mass and the forces on it -> its acceleration), compute that quantity — "
+           "players buzz there." if anticipate else ""),
         max_tokens=500, temperature=0.0, model=model,
     )
     if "NOTCOMPUTABLE" in r.upper():
