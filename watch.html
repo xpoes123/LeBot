@@ -143,10 +143,27 @@ async function play() {
       $('buzz').textContent = 'BUZZ — ' + d.guess; $('buzz').className = 'on';
       $('buzzat').textContent = `decided on ${n} words, landed at word ${heard} of ${words.length} (${Math.round(heard / words.length * 100)}%)`;
       const el = $('w' + Math.max(0, heard - 1)); if (el) el.classList.add('bot');
+      const tBuzz = performance.now(), atBuzz = heard;
+      let over = false;
+      setTimeout(async () => {   // the reader keeps going: re-answer with what's heard ~1 s after the buzz
+        if (my !== run || heard <= atBuzz) return;
+        const n2 = heard;
+        try {
+          const d2 = await (await fetch('/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ prefix: words.slice(0, n2).join(' '), category: q.category, fast: true,
+                                   mode: $('mode').value, total_words: Math.max(40, n2 * 2), history: history.slice() }) })).json();
+          const ms = Math.round(performance.now() - tBuzz);
+          if (my !== run) return;
+          if (d2.guess && d2.guess.toUpperCase() !== 'UNKNOWN' && ms <= 2000) {
+            over = true; buzzed.guess = d2.guess; $('buzz').textContent = 'BUZZ — ' + d2.guess;
+            $('buzzat').textContent += ` · overread to word ${n2}, answered ${d2.guess} at ${ms} ms`;
+          }
+        } catch (e) {}
+      }, 1000);
       finalSolve(words.slice(0, heard).join(' '), 2000).then(f => {   // Sonnet's ~2 s answer window
         if (my !== run) return;
-        if (f.guess && f.inTime) { buzzed.guess = f.guess; $('buzz').textContent = 'BUZZ — ' + f.guess; }
-        $('buzzat').textContent += f.inTime ? ` · final answer in ${f.ms} ms: ${f.guess || '—'}` : ` · full solve took ${f.ms} ms (> 2 s), kept the quick answer`;
+        if (f.guess && f.inTime && !over) { buzzed.guess = f.guess; $('buzz').textContent = 'BUZZ — ' + f.guess; }
+        $('buzzat').textContent += f.inTime ? ` · full solve in ${f.ms} ms: ${f.guess || '—'}` : ` · full solve took ${f.ms} ms (> 2 s)`;
       });
     }
   }
