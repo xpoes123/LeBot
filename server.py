@@ -239,11 +239,12 @@ def _reason_text(mode, reasoning):
     return reasoning
 
 
-# mode -> (Jev threshold, Sonnet must always guess, Haiku must agree). Held out (563 Qs):
-#   balanced  buzzes 75% of Qs, 72% acc, median @69% of stem
-#   confident 62%, 89% acc, @86% (Haiku-agreed buzzes are right 92-94%; disagreed 68-74%)
-#   full      buzz on any guess with a real chance — earliest, least accurate (not measured)
-MODES = {"full": (0.1, True, False), "balanced": (0.6, False, False), "confident": (0.8, False, True)}
+# mode -> (Jev threshold, Sonnet always guesses, Haiku must agree). Jev owns the buzz, so the guesser should
+# surface its best guess instead of abstaining. Held out (120 Qs, median buzz point / acc):
+#   full      always-guess, Jev>=0.6  -> @49%, 51%   (a gamble)
+#   balanced  always-guess, Jev>=0.8  -> @56%, 68%   (cautious prompt at the same acc: @64%)
+#   confident cautious + Haiku agrees -> @86%, 89%   (563 Qs)
+MODES = {"full": (0.6, True, False), "balanced": (0.8, True, False), "confident": (0.8, False, True)}
 
 
 def _gate(guess: str, buzz: dict, mode: str):
