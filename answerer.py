@@ -273,12 +273,38 @@ def anticipate_sa(prefix, category, n=1, model=None, force=False):
         return list(ex.map(one, range(n)))
 
 
+_MC_OPT = re.compile(r"(?i)(?:^|[\s.,;:])w[,.:)]\s")   # choices always start at W; "x, y" alone is algebra
+
+
+def mc_fast(prefix, category, model=None):
+    """Live MC with the choices being read (W, X, Y, Z in order, the last maybe cut off): the option
+    LETTER if determinable now — including by elimination on NOT/EXCEPT questions, the moment the
+    last unread letter is announced — else UNKNOWN."""
+    r = _call(
+        META_SA.format(category=category),
+        f"A multiple-choice tossup is being read aloud; the choices come in order W, X, Y, Z and the "
+        f"last one heard may be cut off. Heard so far:\n\"{prefix}...\"\n\n"
+        "Reply with ONLY the letter of the correct choice if you can already tell. That includes "
+        "elimination: if the question asks which is NOT / EXCEPT / LEAST and every fully-read choice is "
+        "clearly ruled out, the answer is the next letter even before its text is read. Otherwise reply "
+        "UNKNOWN.\nLetter:",
+        max_tokens=5, temperature=0.0, model=model)
+    m = re.match(r"\s*([WXYZ])\b", r.upper())
+    return m.group(1) if m else "UNKNOWN"
+
+
 def anticipate_fast_confirm(prefix, category, n=3, force=False):
     """Live EARLY-BUZZ signal. Sonnet lean + an INDEPENDENT Haiku vote, in parallel.
     -> (sonnet_answer, haiku_answer, 'recall'). The caller buzzes only when the two AGREE
     (the correctness signal that separates a premature guess from a settled one), so a buzz
     always carries an answer already in hand — deliverable instantly, no extra solve.
-    Recall-only (no calculator): you buzz early on knowledge; a calc question is heard fully."""
+    Recall-only (no calculator): you buzz early on knowledge; a calc question is heard fully.
+    Once MC choices are being read, both models answer with a letter instead (mc_fast)."""
+    if _MC_OPT.search(prefix):
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fs = ex.submit(mc_fast, prefix, category)
+            fk = ex.submit(mc_fast, prefix, category, FAST)
+            return fs.result(), fk.result(), "mc"
     with ThreadPoolExecutor(max_workers=2) as ex:
         fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, force=force)))   # Sonnet
         fk = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=FAST)))    # Haiku
