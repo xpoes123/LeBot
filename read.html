@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeBot — read to it</title>
+<link rel="stylesheet" href="/tokyo-night.css">
+<style>
+  body { background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+  button { background: var(--blue); color: var(--bg); border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.ghost { background: var(--surface); color: var(--text); }
+  button.ok { background: var(--green); } button.bad { background: var(--red); }
+  button:disabled { opacity: .5; cursor: default; }
+  label, select { font-size: 14px; } label { color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  #heard { font-size: 20px; line-height: 1.7; min-height: 4em; }
+  #heard .interim { color: var(--muted); }
+  #heard .buzzmark { background: var(--blue); color: var(--bg); border-radius: 4px; padding: 0 4px; font-size: 14px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .row { grid-template-columns: 1fr; } #heard { font-size: 18px; } }
+  .k { color: var(--muted); font-size: 13px; }
+  .v { font-size: 22px; font-weight: 600; word-break: break-word; }
+  #buzz { font-size: 30px; font-weight: 800; color: var(--muted); }
+  #buzz.on { color: var(--yellow); }
+  #mic.live { background: var(--red); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  #log { font: 13px/1.6 ui-monospace, monospace; color: var(--muted); max-height: 180px; overflow: auto; }
+  .warn { color: var(--yellow); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Read to LeBot</h1>
+  <p class="sub">Read a short-answer tossup into your mic. It checks every word, beeps when it buzzes (stop reading —
+    or keep going to test the overread), and answers within ~2 s. Chrome's speech recognition does the transcription.</p>
+  <p class="sub warn" id="nosr" hidden>This browser has no speech recognition — use Chrome.</p>
+
+  <div class="bar">
+    <button id="mic">🎙 Start question</button>
+    <button id="end" class="ghost" disabled>End of question</button>
+    <label>category <select id="cat">
+      <option>BIOLOGY</option><option>CHEMISTRY</option><option>PHYSICS</option><option>MATH</option>
+      <option>EARTH_SPACE</option><option>ENERGY</option><option>OTHER</option></select></label>
+    <label>mode <select id="mode"><option value="full">full send</option><option value="balanced" selected>balanced</option><option value="confident">confident</option></select></label>
+  </div>
+
+  <div class="card"><div class="k">heard</div><div id="heard">—</div></div>
+
+  <div class="row">
+    <div class="card">
+      <div class="k">current guess</div>
+      <div class="v" id="guess">—</div>
+      <div class="k" style="margin-top:8px">Jev P(buzz) <span id="pv">—</span> · threshold <span id="tv">—</span> · Haiku agrees <span id="ag">—</span></div>
+    </div>
+    <div class="card">
+      <div class="k">buzz</div>
+      <div id="buzz">—</div>
+      <div class="k" id="buzzat"></div>
+      <div style="margin-top:10px" id="grade" hidden>
+        <button class="ok" id="right">✓ right</button> <button class="bad" id="wrong">✗ wrong</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">scoreboard — <span id="score">0 questions</span></div>
+    <table><thead><tr><th>#</th><th>answer</th><th>buzzed at</th><th>mode</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  </div>
+
+  <div class="card"><div class="k">ticks</div><div id="log"></div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) { $('nosr').hidden = false; $('mic').disabled = true; }
+
+let rec = null, active = false, gen = 0;
+let finals = '', interim = '', checked = 0, inflight = 0, history = [], latest = -1;
+let buzzed = null, ended = false, silenceT = null, results = [];
+try { results = JSON.parse(localStorage.getItem('lebot-read') || '[]'); } catch (e) {}
+
+const heardText = () => (finals + ' ' + interim).trim();
+const words = () => heardText().split(/\s+/).filter(Boolean);
+
+function beep() {
+  try {
+    const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = 880; o.connect(g); g.connect(a.destination); g.gain.value = 0.2;
+    o.start(); o.stop(a.currentTime + 0.25);
+  } catch (e) {}
+}
+
+async function analyze(prefix, fast) {
+  return (await fetch('/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prefix, category: $('cat').value, fast, mode: $('mode').value,
+                           total_words: Math.max(40, prefix.split(/\s+/).length * 2), history: fast ? history.slice() : [] }) })).json();
+}
+
+function render() {
+  const w = finals.trim();
+  $('heard').innerHTML = (w ? w.replace(/</g, '&lt;') : '') + (interim ? ' <span class="interim">' + interim.replace(/</g, '&lt;') + '</span>' : '')
+    + (buzzed ? ` <span class="buzzmark">BUZZ @${buzzed.at}</span>` : '') || '—';
+}
+
+async function tick(n, my) {
+  inflight++;
+  const t0 = performance.now();
+  try {
+    const d = await analyze(words().slice(0, n).join(' '), true);
+    if (my !== gen) return;
+    history.push({ guess: d.guess || 'UNKNOWN', mode: 'recall', agrees: !!d.agrees, words: n });
+    history.sort((a, b) => a.words - b.words);
+    const ms = Math.round(performance.now() - t0);
+    $('log').insertAdjacentHTML('afterbegin', `<div>${n}w → ${d.guess || 'UNKNOWN'} · P ${d.p_gate ?? '—'} · agree ${d.agrees ? 'yes' : 'no'} · ${ms} ms${d.gate_buzz ? ' · BUZZ' : ''}</div>`);
+    if (n < latest) return;
+    latest = n;
+    $('guess').textContent = d.guess || '—';
+    $('pv').textContent = d.p_gate ?? '—'; $('tv').textContent = d.gate_T ?? '—'; $('ag').textContent = d.agrees ? 'yes' : 'no';
+    if (d.gate_buzz && !buzzed && !ended && n >= 3) doBuzz(d.guess, n, my);
+  } catch (e) {
+  } finally { inflight--; }
+}
+
+function doBuzz(guess, decidedAt, my) {
+  const at = words().length;
+  buzzed = { at, guess, decidedAt };
+  beep();
+  $('buzz').textContent = 'BUZZ — ' + guess; $('buzz').className = 'on';
+  $('buzzat').textContent = `decided on ${decidedAt} words, buzzed at word ${at}`;
+  render();
+  const t = performance.now();
+  setTimeout(async () => {      // overread: re-answer with whatever you said in the ~1 s after the beep
+    if (my !== gen || words().length <= at) return;
+    const n2 = words().length;
+    try {
+      const d = await analyze(words().join(' '), true);
+      const ms = Math.round(performance.now() - t);
+      if (my !== gen || !d.guess || d.guess.toUpperCase() === 'UNKNOWN' || ms > 2000) return;
+      buzzed.guess = d.guess; buzzed.over = n2;
+      $('buzz').textContent = 'BUZZ — ' + d.guess;
+      $('buzzat').textContent += ` · overread to word ${n2}, answered at ${ms} ms`;
+    } catch (e) {}
+  }, 1000);
+  setTimeout(() => { if (my === gen) finish(); }, 2100);   // answer window closes
+}
+
+async function endQuestion() {
+  if (ended) return;
+  ended = true;
+  const my = gen;
+  if (!buzzed) {   // like live: no early buzz -> answer when the reading ends
+    $('buzz').textContent = 'end of question — solving…';
+    const t = performance.now();
+    let g = '';
+    try { g = (await analyze(heardText(), false)).guess || ''; } catch (e) {}
+    if (my !== gen) return;
+    buzzed = { at: words().length, guess: g || 'UNKNOWN', end: true };
+    $('buzz').textContent = 'answered at end: ' + buzzed.guess;
+    $('buzzat').textContent = `full solve ${Math.round(performance.now() - t)} ms`;
+    render();
+  }
+  finish();
+}
+
+function finish() {
+  stopMic();
+  $('grade').hidden = false;
+  $('end').disabled = true;
+}
+
+function grade(ok) {
+  results.unshift({ answer: buzzed ? buzzed.guess : 'UNKNOWN', at: buzzed ? buzzed.at : 0,
+                    total: Math.max(words().length, buzzed ? buzzed.at : 0), end: !!(buzzed && buzzed.end),
+                    mode: $('mode').value, ok, text: heardText() });
+  try { localStorage.setItem('lebot-read', JSON.stringify(results.slice(0, 200))); } catch (e) {}
+  $('grade').hidden = true;
+  drawScore();
+}
+
+function drawScore() {
+  const n = results.length, right = results.filter(r => r.ok).length, early = results.filter(r => !r.end);
+  $('score').textContent = `${n} questions · ${right} right · ${early.length} early buzzes (${early.filter(r => r.ok).length} right)`;
+  $('rows').innerHTML = results.map((r, i) => `<tr><td>${n - i}</td><td>${r.answer.replace(/</g, '&lt;')}</td>
+    <td>${r.end ? 'end' : 'word ' + r.at}</td><td>${r.mode}</td><td>${r.ok ? '✓' : '✗'}</td></tr>`).join('');
+}
+
+function startMic() {
+  gen++; const my = gen;
+  finals = interim = ''; checked = 0; inflight = 0; history = []; latest = -1; buzzed = null; ended = false;
+  $('guess').textContent = '—'; $('pv').textContent = $('tv').textContent = $('ag').textContent = '—';
+  $('buzz').textContent = 'listening…'; $('buzz').className = ''; $('buzzat').textContent = '';
+  $('grade').hidden = true; $('log').innerHTML = ''; render();
+  rec = new SR();
+  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+  rec.onresult = e => {
+    if (my !== gen) return;
+    interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finals += ' ' + e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    render();
+    const n = words().length;
+    if (!ended && !buzzed && n >= 3 && n > checked && inflight < 3) { checked = n; tick(n, my); }   // newest word, up to 3 in flight
+    clearTimeout(silenceT);    // ~2 s of silence after speech = end of question
+    if (!buzzed) silenceT = setTimeout(() => { if (my === gen && words().length >= 5) endQuestion(); }, 2200);
+  };
+  rec.onend = () => { if (active && my === gen) { try { rec.start(); } catch (e) {} } };   // Chrome stops on pauses
+  active = true;
+  rec.start();
+  $('mic').textContent = '■ Stop'; $('mic').classList.add('live'); $('end').disabled = false;
+}
+
+function stopMic() {
+  active = false; clearTimeout(silenceT);
+  if (rec) { try { rec.stop(); } catch (e) {} }
+  $('mic').textContent = '🎙 Start question'; $('mic').classList.remove('live');
+}
+
+$('mic').onclick = () => active ? (stopMic(), gen++) : startMic();
+$('end').onclick = endQuestion;
+$('right').onclick = () => grade(true);
+$('wrong').onclick = () => grade(false);
+drawScore();
+</script>
+</body>
+</html>

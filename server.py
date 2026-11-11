@@ -98,6 +98,11 @@ def watch():
     return HTMLResponse(Path("watch.html").read_text())
 
 
+@app.get("/read")
+def read_page():
+    return HTMLResponse(Path("read.html").read_text())
+
+
 @app.get("/tokyo-night.css")
 def tokyo_css():
     return HTMLResponse(Path("tokyo-night.css").read_text(), media_type="text/css")
