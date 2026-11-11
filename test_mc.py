@@ -24,3 +24,13 @@ def test_vote_in_time_respects_the_answer_window():
     t = time.time()
     assert answerer._vote_in_time([mk("Y", 0.1), mk("Z", 0.15), mk("Y", 2)], 0.8) in ("Y", "Z") and time.time() - t < 1.2
     assert answerer._vote_in_time([mk("UNKNOWN", 0.05)] * 3, 0.8) is None
+
+
+def test_parrot_guard_catches_phrase_completion():
+    stem = "He notices that when plotted on the eightfold"
+    assert answerer._parrots_stem("Eightfold Way", stem)
+    assert answerer._parrots_stem("cytotoxic T cells", "Granzyme B, secreted by cytotoxic T cells, activates")
+    assert not answerer._parrots_stem("Kirkwood gaps", "The gravitational influence of Jupiter results in")
+    assert not answerer._parrots_stem("retinal", "Opsin is activated when what molecule")   # single words may recur
+    assert not answerer.asked_yet(stem)                     # "when plotted" is a clause, not the ask
+    assert answerer.asked_yet("how many seconds does it take")
