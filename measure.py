@@ -34,25 +34,25 @@ CACHE = os.path.join(os.path.dirname(__file__), ".cache_live.json")
 STRIDE = 3   # anticipate every 3 words (+ the last) — mirrors live's THINK_STEP cadence
 
 
-def _ck(key, stride):
-    return "|".join(key) + f"|s{stride}"
+def _ck(key, stride, n=3):
+    return "|".join(key) + f"|s{stride}" + ("" if n == 3 else f"|n{n}")
 
 
-def build(qs, limit, stride=STRIDE):
+def build(qs, limit, stride=STRIDE, n=3):
     """Per question: (guess, agrees) at each strided stem prefix, via the real fast confirm."""
     import answerer
     cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
     items = list(qs.items())[:limit] if limit else list(qs.items())
     for i, (key, q) in enumerate(items):
-        ck = _ck(key, stride)
-        if ck in cache:
+        ck = _ck(key, stride, n)
+        if ck in cache or _ck(key, stride) in cache:   # one trajectory per question
             continue
         words = q["stem"].split()
         idx = sorted(set(range(0, len(words), stride)) | {len(words) - 1})
         prefixes = [" ".join(words[: j + 1]) for j in idx]
         def timed(p):
             t = time.time()
-            return answerer.anticipate_fast_confirm(p, q["category"]), time.time() - t
+            return answerer.anticipate_fast_confirm(p, q["category"], n=n), time.time() - t
         with ThreadPoolExecutor(max_workers=4) as ex:
             out = list(ex.map(timed, prefixes))
         res, lat = [r for r, _ in out], [round(t, 2) for _, t in out]
