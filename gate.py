@@ -18,6 +18,7 @@ from buzzer import CATS   # the server imports this module: keep it free of live
 
 SETS = ["stanford-science-bowl", "johns-hopkins-invitational", "dasoni-2", "stanford-college-plus-science-bowl"]
 JUDGE_CACHE = os.path.join(os.path.dirname(__file__), ".cache_judge.json")
+HUMAN_T = 0.8
 MODEL = os.path.join(os.path.dirname(__file__), "gate_model.json")   # shipped: the server needs no caches
 _w = None
 
@@ -119,7 +120,10 @@ if __name__ == "__main__":
     for rec, _h, X, _y in rows:
         rec["_p"] = list(clf.predict_proba(np.array(X))[:, 1])
     items = [(r[0], r[1]) for r in rows]
-    T = max((0.5, 0.6, 0.7, 0.8, 0.9), key=lambda t: measure.evaluate(items, t, judge)[f"P>={t}"]["ev"])
+    # Not the ev-max T (0.9, tuned vs the FASTEST human in the room: buzzes later than people do). The goal is
+    # human-like play: held out, T=0.8 buzzes at ~70% of the stem at ~77% accuracy; humans' in-stem buzzes
+    # land at 65-69% at 69-81%.
+    T = HUMAN_T
     json.dump({"coef": list(clf.coef_[0]), "intercept": float(clf.intercept_[0]), "T": T,
                "n_questions": len(rows)}, open(MODEL, "w"), indent=1)
     print(f"\nshipped {MODEL} (n={len(rows)} questions, T={T})")
