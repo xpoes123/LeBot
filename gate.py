@@ -21,6 +21,17 @@ from buzzer import CATS
 
 SETS = ["stanford-science-bowl", "johns-hopkins-invitational", "dasoni-2", "stanford-college-plus-science-bowl"]
 JUDGE_CACHE = os.path.join(os.path.dirname(__file__), ".cache_judge.json")
+MODEL = os.path.join(os.path.dirname(__file__), "gate_model.json")   # shipped: the server needs no caches
+_w = None
+
+
+def p_correct(rec, i):
+    """Live: P(the guess at tick i is correct) from the shipped weights; -> (P, threshold T)."""
+    global _w
+    if _w is None:
+        _w = json.load(open(MODEL))
+    z = _w["intercept"] + sum(a * b for a, b in zip(_w["coef"], feats(rec, i)))
+    return 1 / (1 + math.exp(-z)), _w["T"]
 
 
 def feats(rec, i):
@@ -92,4 +103,15 @@ if __name__ == "__main__":
         tr_items = [(r[0], r[1]) for r in train]
         T = max((0.5, 0.6, 0.7, 0.8, 0.9), key=lambda t: measure.evaluate(tr_items, t, judge)[f"P>={t}"]["ev"])
         arms = measure.evaluate([(r[0], r[1]) for r in by_set[held]], T, judge)
-        measure.print_report(f"HELD OUT {held} (n={len(by_set[held])}), gate trained on the other two, T={T}", arms)
+        measure.print_report(f"HELD OUT {held} (n={len(by_set[held])}), gate trained on the others, T={T}", arms)
+
+    # ship: fit on everything, tune T on everything
+    rows = [r for s in SETS for r in by_set[s]]
+    clf = fit(rows)
+    for rec, _h, X, _y in rows:
+        rec["_p"] = list(clf.predict_proba(np.array(X))[:, 1])
+    items = [(r[0], r[1]) for r in rows]
+    T = max((0.5, 0.6, 0.7, 0.8, 0.9), key=lambda t: measure.evaluate(items, t, judge)[f"P>={t}"]["ev"])
+    json.dump({"coef": list(clf.coef_[0]), "intercept": float(clf.intercept_[0]), "T": T,
+               "n_questions": len(rows)}, open(MODEL, "w"), indent=1)
+    print(f"\nshipped {MODEL} (n={len(rows)} questions, T={T})")

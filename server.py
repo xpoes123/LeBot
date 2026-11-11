@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sklearn.linear_model import LogisticRegression
 
 import answerer
+import gate
 import jev
 import upload
 from buzzer import load_rows, CATS
@@ -72,6 +73,8 @@ def _mc_letter(value, prefix):
 class _Step(BaseModel):
     guess: str
     mode: str
+    agrees: bool = False   # live fast path: did Haiku confirm this tick's guess
+    words: int = 0         # words heard at this tick (0 = unknown)
 
 
 class AnalyzeReq(BaseModel):
@@ -131,10 +134,10 @@ async def upload_packet(
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
     if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
-        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=3)
+        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=1)
         guess = _mc_letter(guess, req.prefix)
-        buzz = _buzz_features(req, guess, mode, haiku)  # real cross-model `agrees` drives early-buzz
-        return {"guess": guess, "reasoning": "", **buzz}
+        buzz = _buzz_features(req, guess, mode, haiku)
+        return {"guess": guess, "reasoning": "", **buzz, **_gate(req, guess, buzz)}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
     with ThreadPoolExecutor(max_workers=2) as ex:
@@ -166,6 +169,17 @@ def _reason_text(mode, reasoning):
     return reasoning
 
 
+def _gate(req: AnalyzeReq, guess: str, buzz: dict):
+    """The live early-buzz decision (gate.py: trained on this exact fast path, validated on unseen tournaments)."""
+    h = req.history
+    rec = {"seq": [[s.guess, s.agrees] for s in h] + [[guess, bool(buzz["agrees"])]],
+           "idx": [max(s.words, 1) - 1 for s in h] + [len(req.prefix.split()) - 1],
+           "category": req.category, "jev": [None] * len(h) + [buzz["p_jev"]]}
+    p, T = gate.p_correct(rec, len(h))
+    named = bool(guess and guess.upper() != "UNKNOWN")
+    return {"p_gate": round(p, 3), "gate_T": T, "gate_buzz": named and p >= T}
+
+
 def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
     """Shared buzzer feature computation used by both endpoints."""
     words_heard = len(req.prefix.split())
@@ -186,7 +200,8 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
     cat_vec = [1.0 if req.category == c else 0.0 for c in CATS]
     feats = np.array([[frac, 0.0 if is_unk else 1.0, float(run), float(churn),
                        np.log1p(total), is_calc] + cat_vec])
-    traj = [] if is_unk else [(None, g) for g in all_guesses if g and g.upper() != "UNKNOWN"]
+    traj = [] if is_unk else [((h.words - 1) if h.words else None, h.guess) for h in req.history
+                              if h.guess and h.guess.upper() != "UNKNOWN"] + [(words_heard - 1, guess)]
     p, p_jev = _p_buzz(feats, req.prefix, req.category, traj)
     haiku_no_guess = not haiku_guess or haiku_guess.upper() == "UNKNOWN"
     agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and not haiku_no_guess else None
