@@ -314,7 +314,11 @@ def anticipate_fast_confirm(prefix, category, n=3, force=False):
     (the correctness signal that separates a premature guess from a settled one), so a buzz
     always carries an answer already in hand — deliverable instantly, no extra solve.
     Recall-only (no calculator): you buzz early on knowledge; a calc question is heard fully.
-    Once MC choices are being read, both models answer with a letter instead (mc_fast)."""
+    Once MC choices are being read, both models answer with a letter instead (mc_fast).
+    A canonical ordering (sequences.py: electronegativity, Mohs, ...) is answered exactly, instantly."""
+    seq = sequences.solve_ordering(prefix)
+    if seq is not None:
+        return seq, seq, "seq"
     if _MC_OPT.search(prefix):
         with ThreadPoolExecutor(max_workers=2) as ex:
             fs = ex.submit(mc_fast, prefix, category)
