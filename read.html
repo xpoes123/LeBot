@@ -100,6 +100,13 @@ async function analyze(prefix, fast) {
                            total_words: Math.max(40, prefix.split(/\s+/).length * 2), history: fast ? history.slice() : [] }) })).json();
 }
 
+const CATS = [[/\bbio/i, 'BIOLOGY'], [/\bchem/i, 'CHEMISTRY'], [/\bphysics/i, 'PHYSICS'], [/\bmath/i, 'MATH'],
+              [/\bearth|\bspace\b/i, 'EARTH_SPACE'], [/\benergy/i, 'ENERGY']];
+function autoCategory() {   // the reader announces it first ("Toss-up, Earth and Space, multiple choice ...")
+  const head = words().slice(0, 6).join(' ');
+  for (const [re, c] of CATS) if (re.test(head)) { $('cat').value = c; return; }
+}
+
 function render() {
   const w = finals.trim();
   $('heard').innerHTML = (w ? w.replace(/</g, '&lt;') : '') + (interim ? ' <span class="interim">' + interim.replace(/</g, '&lt;') + '</span>' : '')
@@ -202,7 +209,7 @@ async function startMic() {
   sock.onopen = () => {
     recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
     recorder.ondataavailable = e => { if (e.data.size && sock.readyState === 1) sock.send(e.data); };
-    recorder.start(250);
+    recorder.start(100);   // 100 ms chunks: less buffering before Deepgram hears it
   };
   sock.onmessage = m => {
     if (my !== gen) return;
@@ -211,6 +218,7 @@ async function startMic() {
     if (d.type !== 'Results') return;
     const tr = d.channel.alternatives[0].transcript || '';
     if (d.is_final) { if (tr) finals += ' ' + tr; interim = ''; } else interim = tr;
+    autoCategory();
     render();
     if (!tr) return;
     const n = words().length;

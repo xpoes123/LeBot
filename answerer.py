@@ -276,6 +276,21 @@ def anticipate_sa(prefix, category, n=1, model=None, force=False):
 _MC_OPT = re.compile(r"(?i)(?:^|[\s.,;:])w[,.:)]\s")   # choices always start at W; "x, y" alone is algebra
 
 
+_MC_Z = re.compile(r"(?i)(?:^|[\s.,;:])z[,.:)]?(\s|$)")   # "Z" announced = W, X, Y fully read
+
+
+def mc_commit(prefix, category):
+    """Choices W-Y are read and Z is being announced: strong players buzz NOW. Forced letter."""
+    r = _call(
+        META_SA.format(category=category),
+        f"A multiple-choice tossup is being read aloud; choices W, X and Y have been read and Z is being "
+        f"announced:\n\"{prefix}...\"\n\nYou must commit now. Reply with ONLY one letter: the choice among "
+        "W, X, Y that answers the question, or Z if none of them does.\nLetter:",
+        max_tokens=5, temperature=0.0)
+    m = re.match(r"\s*([WXYZ])\b", r.upper())
+    return m.group(1) if m else "Z"
+
+
 def mc_fast(prefix, category, model=None):
     """Live MC with the choices being read (W, X, Y, Z in order, the last maybe cut off): the option
     LETTER if determinable now — including by elimination on NOT/EXCEPT questions, the moment the
@@ -285,9 +300,9 @@ def mc_fast(prefix, category, model=None):
         f"A multiple-choice tossup is being read aloud; the choices come in order W, X, Y, Z and the "
         f"last one heard may be cut off. Heard so far:\n\"{prefix}...\"\n\n"
         "Reply with ONLY the letter of the correct choice if you can already tell. That includes "
-        "elimination: if the question asks which is NOT / EXCEPT / LEAST and every fully-read choice is "
-        "clearly ruled out, the answer is the next letter even before its text is read. Otherwise reply "
-        "UNKNOWN.\nLetter:",
+        "elimination, which strong players use: if the question asks which is NOT / EXCEPT / LEAST and "
+        "W, X and Y have all been read and each is clearly NOT the answer, reply Z right away — "
+        "before Z is read. Otherwise reply UNKNOWN.\nLetter:",
         max_tokens=5, temperature=0.0, model=model)
     m = re.match(r"\s*([WXYZ])\b", r.upper())
     return m.group(1) if m else "UNKNOWN"
