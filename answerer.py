@@ -593,10 +593,11 @@ def _parrots_stem(ans, prefix):
     the guess is a multi-word phrase already present in the stem, it's parroting — e.g.
     guessing 'cytotoxic T cells' off 'Granzyme B, secreted by cytotoxic T cells, activates
     ...'. Reject it. (Single words can legitimately recur, so only guard phrases.)"""
-    a = _norm(ans)
+    bare = lambda x: " ".join(re.sub(r"[^\w\s]", " ", (x or "").lower()).split())   # "Mid-Atlantic" == "Mid Atlantic"
+    a = bare(ans)
     if not a or a == "unknown" or len(a.split()) < 2:
         return False
-    p = _norm(prefix)
+    p = bare(prefix)
     # also a guess that COMPLETES the phrase being read ("...plotted on the eightfold" -> "Eightfold Way"): held out,
     # 11 such guesses, 0 right; a live rehearsal buzzed one at Jev 0.82 (-4)
     return a in p or a.split()[0] == p.split()[-1]

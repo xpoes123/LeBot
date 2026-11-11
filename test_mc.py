@@ -32,5 +32,6 @@ def test_parrot_guard_catches_phrase_completion():
     assert answerer._parrots_stem("cytotoxic T cells", "Granzyme B, secreted by cytotoxic T cells, activates")
     assert not answerer._parrots_stem("Kirkwood gaps", "The gravitational influence of Jupiter results in")
     assert not answerer._parrots_stem("retinal", "Opsin is activated when what molecule")   # single words may recur
+    assert answerer._parrots_stem("The Mid-Atlantic Ridge", "three types of faulting that occur at the Mid Atlantic Ridge.")
     assert not answerer.asked_yet(stem)                     # "when plotted" is a clause, not the ask
     assert answerer.asked_yet("how many seconds does it take")
