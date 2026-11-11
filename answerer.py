@@ -333,6 +333,29 @@ def mc_fast(prefix, category, model=None):
     return m.group(1) if m else "UNKNOWN"
 
 
+QUICK_MODEL = "claude-opus-4-8"   # 17/21 calc tossups, median 1.3 s / p90 1.7 s (Sonnet 16/21 at 1.7/2.1 s, Haiku 15/21)
+
+
+def quick_compute(prefix, category):
+    """Answer a computational tossup inside the ~2 s answer window: a few terse lines of work, then the value.
+    (solve()'s code-writing path takes 6-9 s and Sonnet second-guesses itself past any short budget.)"""
+    r = _call(
+        META_SA.format(category=category),
+        f"Live buzz race, SHORT-ANSWER computational tossup:\n\"{prefix}\"\n\nSolve it fast: at most 3 terse lines "
+        "of work (no restating, no second-guessing), then a final line `ANSWER: <value only>` in exact simplest "
+        "form, units omitted.",
+        max_tokens=150, temperature=0.0, model=QUICK_MODEL)
+    m = re.findall(r"ANSWER:\s*(.+)", r)
+    if m:
+        return _clean_answer(m[-1])
+    n = re.findall(r"=\s*(-?[\d./]+)\s*(?:$|[^\d./^])", r)   # out of room: the last value it computed
+    return n[-1] if n else "UNKNOWN"
+
+
+def is_computational(prefix, category):
+    return category in ("MATH", "PHYSICS", "CHEMISTRY", "ENERGY", "EARTH_SPACE") and bool(re.search(r"\d", prefix))
+
+
 def anticipate_fast_confirm(prefix, category, n=3, force=False, haiku=True):
     """Live EARLY-BUZZ signal. Sonnet lean + an INDEPENDENT Haiku vote, in parallel.
     -> (sonnet_answer, haiku_answer, 'recall'). The caller buzzes only when the two AGREE

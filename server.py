@@ -85,6 +85,7 @@ class AnalyzeReq(BaseModel):
     history: list[_Step] = []
     fast: bool = False   # live bot: Haiku-only anticipation (~0.4s vs ~2-7s)
     mode: str = "balanced"   # live buzz mode, see MODES
+    final: bool = False      # the answer the bot will SAY (after a buzz / at the end): computes if it's a calc question
 
 
 _nsba4 = json.loads(Path("nsba4_questions.json").read_text())
@@ -207,6 +208,10 @@ async def upload_packet(
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
     if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
+        if req.final and not answerer.is_mc(req.prefix) and answerer.is_computational(req.prefix, req.category):
+            guess = answerer.quick_compute(req.prefix, req.category)
+            return {"guess": guess, "reasoning": "", "mode": "quick-compute", "agrees": None, "p_jev": None,
+                    "p_gate": None, "gate_T": None, "gate_buzz": False}
         if answerer.mc_past_y(req.prefix):
             # MC with Y being read: always buzz (top-player strategy); the overread re-answer refines the letter
             guess = answerer.mc_commit(req.prefix, req.category)
