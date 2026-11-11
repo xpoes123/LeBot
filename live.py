@@ -120,6 +120,7 @@ PRECOMP_STEP = 5      # words of new speech between full-accuracy answer attempt
 THINK_STEP = 1        # words between fast checks (Sonnet guess + Jev buzz call); they overlap
 THINK_MAX = 3         # fast checks in flight at once (~0.85 s each vs ~0.37 s per word)
 END_TIMEOUT = 18.0    # hard cap on the final solve (Opus-retry math can be ~12s); then fall back
+MODE = os.environ.get("LEBOT_MODE", "balanced")   # full | balanced | confident (server.MODES)
 ANSWER_WINDOW = 2.0   # after an early buzz, Sonnet has ~2 s (NSB) to finalize before we must answer
 
 
@@ -247,7 +248,7 @@ async def _run(ws, client):
         try:
             d = (await client.post(f"{LEBOT_URL}/analyze", json={
                 "prefix": qtext, "category": cat or "OTHER", "fast": True,
-                "total_words": est_total(words),
+                "total_words": est_total(words), "mode": MODE,
                 "history": leans})).json()
         except Exception:
             d = {}

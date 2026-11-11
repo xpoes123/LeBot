@@ -239,6 +239,8 @@ def _clean_answer(r):
     if re.match(r"(?i)(for|in the|since|because|if|when|as the|according|assuming|"
                 r"we|let|first|note that|given|thus|therefore|so the)\b[\s,]+\S+", r):
         return "UNKNOWN"
+    if re.match(r"(?i)the (question|problem|answer)\b", r):   # meta-talk ("The question ..."), not a term
+        return "UNKNOWN"
     # a dangling connective/preposition at the end = truncated mid-phrase, not a clean
     # term (excludes "a"/"an" so "vitamin A", "plan B" survive)
     if re.search(r"(?i)\s(and|or|of|the|to|with|for|by|in|on|at|that|which|as)$", r):
@@ -247,7 +249,7 @@ def _clean_answer(r):
     return "UNKNOWN" if len(r.split()) > 7 or not r else r
 
 
-def anticipate_sa(prefix, category, n=1, model=None):
+def anticipate_sa(prefix, category, n=1, model=None, force=False):
     """Short-answer anticipation: predict the free-text answer from a cut-off stem.
     Returns n predictions (each a TERSE answer, or 'UNKNOWN'). model=FAST for low latency."""
     sys = META_SA.format(category=category)
@@ -259,7 +261,8 @@ def anticipate_sa(prefix, category, n=1, model=None):
             "Give ONLY the answer itself — a single term, name, or value, at most a few "
             "words (e.g. \"mitochondria\", \"contact metamorphism\", \"36 mph\"). "
             "NO sentence, NO explanation, do not write \"X is...\". "
-            "If not yet determinable, reply UNKNOWN.\nAnswer:",
+            + ("Even if unsure, give your single best guess — never UNKNOWN.\nAnswer:" if force
+               else "If not yet determinable, reply UNKNOWN.\nAnswer:"),
             max_tokens=12, temperature=0.7, model=model,
         )
         return _clean_answer(r)
@@ -270,14 +273,14 @@ def anticipate_sa(prefix, category, n=1, model=None):
         return list(ex.map(one, range(n)))
 
 
-def anticipate_fast_confirm(prefix, category, n=3):
+def anticipate_fast_confirm(prefix, category, n=3, force=False):
     """Live EARLY-BUZZ signal. Sonnet lean + an INDEPENDENT Haiku vote, in parallel.
     -> (sonnet_answer, haiku_answer, 'recall'). The caller buzzes only when the two AGREE
     (the correctness signal that separates a premature guess from a settled one), so a buzz
     always carries an answer already in hand — deliverable instantly, no extra solve.
     Recall-only (no calculator): you buzz early on knowledge; a calc question is heard fully."""
     with ThreadPoolExecutor(max_workers=2) as ex:
-        fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n)))                # Sonnet
+        fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, force=force)))   # Sonnet
         fk = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=FAST)))    # Haiku
         sonnet, haiku = fs.result(), fk.result()
     resolved, is_excl = resolve_exclusion(sonnet, prefix)

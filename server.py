@@ -82,6 +82,7 @@ class AnalyzeReq(BaseModel):
     total_words: int = 50
     history: list[_Step] = []
     fast: bool = False   # live bot: Haiku-only anticipation (~0.4s vs ~2-7s)
+    mode: str = "balanced"   # live buzz mode, see MODES
 
 
 _nsba4 = json.loads(Path("nsba4_questions.json").read_text())
@@ -151,10 +152,11 @@ async def upload_packet(
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
     if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
-        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=1)
+        force = MODES.get(req.mode, MODES["balanced"])[1]
+        guess, haiku, mode = answerer.anticipate_fast_confirm(req.prefix, req.category, n=1, force=force)
         guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, haiku)
-        return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz)}
+        return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode)}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
     with ThreadPoolExecutor(max_workers=2) as ex:
@@ -186,15 +188,21 @@ def _reason_text(mode, reasoning):
     return reasoning
 
 
-JEV_T = 0.6   # aggressive (demo): held out buzzes 75% of Qs @~69%, 72% acc; 0.8 -> 70% @70%, 78%
+# mode -> (Jev threshold, Sonnet must always guess, Haiku must agree). Held out (563 Qs):
+#   balanced  buzzes 75% of Qs, 72% acc, median @69% of stem
+#   confident 62%, 89% acc, @86% (Haiku-agreed buzzes are right 92-94%; disagreed 68-74%)
+#   full      buzz on any guess with a real chance — earliest, least accurate (not measured)
+MODES = {"full": (0.1, True, False), "balanced": (0.6, False, False), "confident": (0.8, False, True)}
 
 
-def _gate(guess: str, buzz: dict):
+def _gate(guess: str, buzz: dict, mode: str):
     """The live buzz decision is Jev's alone: P(Sonnet's running guess is right, given the question so far).
     Sonnet then gets the ~2 s answer window to finalize (live.py)."""
+    t, _force, need_agree = MODES.get(mode, MODES["balanced"])
     p = buzz["p_jev"]
     named = bool(guess and guess.upper() != "UNKNOWN")
-    return {"p_gate": p, "gate_T": JEV_T, "gate_buzz": named and p is not None and p >= JEV_T}
+    ok = named and p is not None and p >= t and (bool(buzz["agrees"]) or not need_agree)
+    return {"p_gate": p, "gate_T": t, "gate_buzz": ok}
 
 
 def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
