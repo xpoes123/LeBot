@@ -90,6 +90,11 @@ def _confirm_run(prev_norm, prev_run, norm, agrees):
     return norm, 1
 
 
+def est_total(words):
+    """Live can't know a question's length until it ends; the buzzer's `frac` feature uses this guess."""
+    return max(40, words * 2)
+
+
 BUZZ_RUN = 2   # consecutive cross-model-confirmed ticks on one answer before we commit (buzz)
 
 
@@ -163,10 +168,12 @@ async def _run(ws, client):
     think_inflight, full_inflight = set(), set()
     pre = {"words": 0, "answer": None, "reasoning": "", "mode": ""}
     conf_norm, conf_run, committed = None, 0, False   # cross-model-confirmed run; early-buzz fired?
+    leans = []   # this question's fast ticks, oldest first -> server history (gate + Jev trajectory)
 
     def reset_reading():
         nonlocal reading, finals, interim, last_think, last_full, pre, answered, answered_words, seen_opts
         nonlocal conf_norm, conf_run, committed
+        leans.clear()
         reading, finals, interim, last_think, last_full = False, [], "", 0, 0
         answered, answered_words, seen_opts = False, 0, 0
         conf_norm, conf_run, committed = None, 0, False
@@ -234,11 +241,14 @@ async def _run(ws, client):
         try:
             d = (await client.post(f"{LEBOT_URL}/analyze", json={
                 "prefix": qtext, "category": cat or "OTHER", "fast": True,
-                "total_words": max(40, words * 2), "history": []})).json()
+                "total_words": est_total(words),
+                "history": leans})).json()
         except Exception:
             d = {}
         g = d.get("guess", "")
         named = bool(g and g.upper() != "UNKNOWN")
+        if d and state["gen"] == gen:   # every tick, UNKNOWN too: it resets the gate's runs as in training
+            leans.append({"guess": g or "UNKNOWN", "mode": "recall", "agrees": bool(d.get("agrees")), "words": words})
         with _lock:
             if state["gen"] == gen and named:
                 state["thinking"] = g
@@ -246,7 +256,7 @@ async def _run(ws, client):
         conf_norm, conf_run = _confirm_run(conf_norm, conf_run, norm, bool(d.get("agrees")))
         # short-answer only: for W/X/Y/Z MC the choices are read AFTER the stem, so we can't
         # commit to a letter mid-stem — that path keeps the existing per-option behavior.
-        if (conf_run >= BUZZ_RUN and state["gen"] == gen and not committed and words >= 3
+        if (d.get("gate_buzz", conf_run >= BUZZ_RUN) and state["gen"] == gen and not committed and words >= 3
                 and "multiple" not in state["qformat"]):
             pre.update(words=words, answer=g, reasoning=d.get("reasoning", "") or "cross-model confirmed",
                        mode=d.get("mode", "recall"))
