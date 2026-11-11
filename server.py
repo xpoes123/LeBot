@@ -218,8 +218,17 @@ def analyze(req: AnalyzeReq):
             return {"guess": guess, "reasoning": "", "mode": "mc-commit", "agrees": None, "p_jev": None,
                     "p_gate": 1.0, "gate_T": None, "gate_buzz": True}
         _t, force, need_agree = MODES.get(req.mode, MODES["balanced"])
-        guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
-            req.prefix, req.category, n=1, force=force, haiku=need_agree)
+        calc = answerer.is_computational(req.prefix, req.category) and not answerer.is_mc(req.prefix)
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            # calc tossups: Jev judges readiness from the text alone (the running guess can't compute mid-read)
+            f_ready = ex.submit(jev.calc_ready, req.prefix, req.category) if calc else None
+            guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
+                req.prefix, req.category, n=1, force=force, haiku=need_agree)
+            ready = f_ready.result() if f_ready else None
+        if ready is not None and ready >= CALC_T.get(req.mode, 0.8):
+            # buzz now; the client asks for the answer at once (final=true -> Opus quick-compute in the window)
+            return {"guess": "…", "reasoning": "", "mode": "calc-ready", "agrees": None, "p_jev": ready,
+                    "p_gate": round(ready, 3), "gate_T": CALC_T.get(req.mode, 0.8), "gate_buzz": True}
         guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, haiku)
         return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode, req.prefix)}
@@ -262,6 +271,7 @@ def _reason_text(mode, reasoning):
 MODES = {"full": (0.6, True, False), "balanced": (0.8, True, False), "confident": (0.8, False, True)}
 
 
+CALC_T = {"full": 0.5}   # calc readiness threshold per mode (default 0.8)
 PRE_ASK_T = 0.95   # before the question asks anything, only near-certain buzzes (balanced/confident)
 
 

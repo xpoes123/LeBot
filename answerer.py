@@ -336,9 +336,17 @@ def mc_fast(prefix, category, model=None):
 QUICK_MODEL = "claude-opus-4-8"   # 17/21 calc tossups, median 1.3 s / p90 1.7 s (Sonnet 16/21 at 1.7/2.1 s, Haiku 15/21)
 
 
-def quick_compute(prefix, category):
-    """Answer a computational tossup inside the ~2 s answer window: a few terse lines of work, then the value.
-    (solve()'s code-writing path takes 6-9 s and Sonnet second-guesses itself past any short budget.)"""
+def quick_compute(prefix, category, k=3):
+    """Answer a computational tossup inside the ~2 s answer window: k parallel Opus solves, majority value
+    (one solve is right ~75% of the time on the springs question; wall time ~= one solve)."""
+    with ThreadPoolExecutor(max_workers=k) as ex:
+        vals = [v for v in ex.map(lambda _: _quick_once(prefix, category), range(k)) if v and v.upper() != "UNKNOWN"]
+    return _vote(vals) if vals else "UNKNOWN"
+
+
+def _quick_once(prefix, category):
+    """One solve: a few terse lines of work, then the value. (solve()'s code-writing path takes 6-9 s and Sonnet
+    second-guesses itself past any short budget.)"""
     r = _call(
         META_SA.format(category=category),
         f"Live buzz race, SHORT-ANSWER computational tossup:\n\"{prefix}\"\n\nSolve it fast: at most 3 terse lines "

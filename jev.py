@@ -44,3 +44,32 @@ def p_correct(text, cat, traj, timeout=2.0):
         return ask(state(text, cat, traj), timeout)
     except Exception:
         return None
+
+
+CALC_CRITERIA = {
+    "yes": "everything needed to compute the answer has been given, and what the question asks for is either "
+           "stated or obvious from the setup (e.g. given masses and forces -> the acceleration)",
+    "no": "a needed quantity hasn't been given yet, or it's unclear what will be asked",
+}
+
+
+def calc_ready(text, cat, timeout=2.0):
+    """Computational tossup: could a top player buzz now and compute it in the answer window? P(yes) or None.
+    Question text only — no guess needed (the running guess is useless mid-calc). Springs example: ~0 until
+    "minimum potential energy" (0.83), 0.93 at the end."""
+    if not os.environ.get("JEV_API_KEY"):
+        return None
+    try:
+        r = requests.post(URL, timeout=timeout, headers={"Authorization": f"Bearer {os.environ['JEV_API_KEY']}"},
+                          json={"model": "jev-latest", "questions": {"ready": {
+                              "type": "choice", "criteria": CALC_CRITERIA,
+                              "question": "Could a top player buzz now and compute the answer in 2 seconds?"}},
+                              "state": f"National Science Bowl computational short-answer tossup, category {cat}, "
+                                       f"being read aloud (live transcript). Heard so far:\n\"{text}\""})
+        r.raise_for_status()
+        a = r.json()["answers"]["ready"]
+    except Exception:
+        return None
+    if "probabilities" in a:
+        return float(a["probabilities"]["yes"])
+    return a["confidence"] if a["choice"] == "yes" else 1 - a["confidence"]
