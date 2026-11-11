@@ -178,8 +178,9 @@ async function tick(n, my) {
 }
 
 const isMcText = t => /multiple[- ]?choice/i.test(t.slice(0, 150)) || /(?:^|[\s.,;:?])w[,.:)]\s/i.test(t);
-// short answer: the moderator's "?" is the end of the tossup. Buzz 0.4 s after it (vs the 1.5 s silence timer) —
+// short answer: the moderator's "?" plus a pause is the end of the tossup — buzz then (vs the 1.5 s silence timer):
 // there's no interrupt penalty once the question is done, and the race at the end is a reaction-time race.
+// (A "?" alone isn't enough: Deepgram's interims arrive ~1/s and sometimes put a "?" on a mid-sentence pause.)
 const endsQuestion = t => /\?\s*$/.test(t) && !isMcText(t);
 
 // same rule as answerer.mc_past_y: MC (announced, or "W," punctuated) and Y's text has started -> buzz now
@@ -298,8 +299,11 @@ async function startMic() {
     if (d.is_final) { if (tr) finals += ' ' + tr; interim = ''; } else interim = tr;
     autoCategory();
     render();
-    if (!tr) return;
     const n = words().length;
+    // the reader paused (Deepgram endpoint, ~0.5 s; often an empty speech_final message) right after a closing "?":
+    // the tossup is over, buzz now
+    if (!ended && !buzzed && n >= 6 && d.speech_final && endsQuestion(heardText())) { endQuestion(); return; }
+    if (!tr) return;
     if (!ended && !buzzed && mcPastY(heardText())) {   // MC past Y: buzz first, answer inside the 2 s window
       doBuzz('…', n, my);
       const t = performance.now();
@@ -312,9 +316,8 @@ async function startMic() {
     }
     if (!ended && !buzzed && n >= 3 && n > checked && inflight < 3) { checked = n; tick(n, my); }   // newest word, up to 3 in flight
     // (silence messages returned above, so only real words reset the end-of-question timer)
-    clearTimeout(silenceT);    // silence after speech = end of question (0.4 s after a closing "?", else 1.5 s)
-    if (!buzzed) silenceT = setTimeout(() => { if (my === gen && words().length >= 5) endQuestion(); },
-                                      n >= 6 && endsQuestion(heardText()) ? 400 : 1500);
+    clearTimeout(silenceT);    // ~1.5 s of silence after speech = end of question (list/ordering questions, MC)
+    if (!buzzed) silenceT = setTimeout(() => { if (my === gen && words().length >= 5) endQuestion(); }, 1500);
   };
   active = true;
   $('mic').textContent = '■ Stop'; $('mic').classList.add('live'); $('end').disabled = false;
