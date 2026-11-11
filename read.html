@@ -38,8 +38,8 @@
 <main>
   <h1>Read to LeBot</h1>
   <p class="sub">Read a short-answer tossup into your mic. It checks every word, beeps when it buzzes (stop reading —
-    or keep going to test the overread), and answers within ~2 s. Chrome's speech recognition does the transcription.</p>
-  <p class="sub warn" id="nosr" hidden>This browser has no speech recognition — use Chrome.</p>
+    or keep going to test the overread), and answers within ~2 s. Deepgram transcribes (same as the live bot).</p>
+  <p class="sub warn" id="nosr" hidden></p>
 
   <div class="bar">
     <button id="mic">🎙 Start question</button>
@@ -77,10 +77,8 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SR) { $('nosr').hidden = false; $('mic').disabled = true; }
-
-let rec = null, active = false, gen = 0;
+let sock = null, recorder = null, stream = null, active = false, gen = 0;
+function warn(msg) { $('nosr').textContent = msg; $('nosr').hidden = !msg; }
 let finals = '', interim = '', checked = 0, inflight = 0, history = [], latest = -1;
 let buzzed = null, ended = false, silenceT = null, results = [];
 try { results = JSON.parse(localStorage.getItem('lebot-read') || '[]'); } catch (e) {}
@@ -190,36 +188,46 @@ function drawScore() {
     <td>${r.end ? 'end' : 'word ' + r.at}</td><td>${r.mode}</td><td>${r.ok ? '✓' : '✗'}</td></tr>`).join('');
 }
 
-function startMic() {
+async function startMic() {
   gen++; const my = gen;
+  warn('');
   finals = interim = ''; checked = 0; inflight = 0; history = []; latest = -1; buzzed = null; ended = false;
   $('guess').textContent = '—'; $('pv').textContent = $('tv').textContent = $('ag').textContent = '—';
   $('buzz').textContent = 'listening…'; $('buzz').className = ''; $('buzzat').textContent = '';
   $('grade').hidden = true; $('log').innerHTML = ''; render();
-  rec = new SR();
-  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
-  rec.onresult = e => {
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { warn('Mic blocked: ' + e.message + ' — allow microphone access for this site.'); return; }
+  sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/listen');
+  sock.onerror = () => warn('Lost the connection to the transcriber.');
+  sock.onopen = () => {
+    recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+    recorder.ondataavailable = e => { if (e.data.size && sock.readyState === 1) sock.send(e.data); };
+    recorder.start(250);
+  };
+  sock.onmessage = m => {
     if (my !== gen) return;
-    interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finals += ' ' + e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
-    }
+    const d = JSON.parse(m.data);
+    if (d.type === 'Error' || d.err_msg) { warn('Transcriber error: ' + (d.error || d.err_msg)); return; }
+    if (d.type !== 'Results') return;
+    const tr = d.channel.alternatives[0].transcript || '';
+    if (d.is_final) { if (tr) finals += ' ' + tr; interim = ''; } else interim = tr;
     render();
+    if (!tr) return;
     const n = words().length;
     if (!ended && !buzzed && n >= 3 && n > checked && inflight < 3) { checked = n; tick(n, my); }   // newest word, up to 3 in flight
+    // (silence messages returned above, so only real words reset the end-of-question timer)
     clearTimeout(silenceT);    // ~2 s of silence after speech = end of question
     if (!buzzed) silenceT = setTimeout(() => { if (my === gen && words().length >= 5) endQuestion(); }, 2200);
   };
-  rec.onend = () => { if (active && my === gen) { try { rec.start(); } catch (e) {} } };   // Chrome stops on pauses
   active = true;
-  rec.start();
   $('mic').textContent = '■ Stop'; $('mic').classList.add('live'); $('end').disabled = false;
 }
 
 function stopMic() {
   active = false; clearTimeout(silenceT);
-  if (rec) { try { rec.stop(); } catch (e) {} }
+  try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (e) {}
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try { if (sock) sock.close(); } catch (e) {}
   $('mic').textContent = '🎙 Start question'; $('mic').classList.remove('live');
 }
 
