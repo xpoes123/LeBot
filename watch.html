@@ -49,6 +49,7 @@
     <button id="go">▶ Read a question</button>
     <button id="stop" class="ghost" disabled>■ Stop</button>
     <label><input type="checkbox" id="speak" checked> read aloud</label>
+    <label>mode <select id="mode"><option value="full">full send</option><option value="balanced" selected>balanced</option><option value="confident">confident</option></select></label>
     <label>speed <select id="wps"><option value="2.2">2.2 w/s</option><option value="2.7" selected>2.7 w/s (NSB)</option><option value="3.2">3.2 w/s</option></select></label>
   </div>
 
@@ -121,7 +122,8 @@ async function play() {
     try {
       d = await (await fetch('/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prefix: words.slice(0, n).join(' '), category: q.category, fast: true,
-                               total_words: Math.max(40, n * 2), history: history.slice() }) })).json();
+                               total_words: Math.max(40, n * 2), mode: $('mode').value,
+                               history: history.slice() }) })).json();
     } catch (e) { return; }
     if (my !== run) return;
     history.push({ guess: d.guess || 'UNKNOWN', mode: 'recall', agrees: !!d.agrees, words: n });
