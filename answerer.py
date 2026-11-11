@@ -19,6 +19,14 @@ import anthropic
 
 import sequences
 
+# ponytail: minimal .env loader (KEY=VALUE lines); real env vars win
+_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_ENV):
+    for _line in open(_ENV):
+        _k, _, _v = _line.strip().partition("=")
+        if _k and _v and not _k.startswith("#"):
+            os.environ.setdefault(_k, _v)
+
 LETTERS = ["W", "X", "Y", "Z"]
 MODEL = os.environ.get("LEBOT_MODEL", "claude-sonnet-4-6")       # System 2: thinking
 FAST = os.environ.get("LEBOT_FAST", "claude-haiku-4-5-20251001")  # System 1: subconscious
