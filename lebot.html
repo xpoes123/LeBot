@@ -1,6 +1,18 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>
+// access key: ?key=... once, remembered per browser, sent with every request (server rejects paid calls without it)
+(() => {
+  const q = new URLSearchParams(location.search).get('key');
+  let k = q || '';
+  try { if (q) localStorage.setItem('lebot-key', q); else k = localStorage.getItem('lebot-key') || ''; } catch (e) {}
+  window.LEBOT_KEY = k;
+  const f = window.fetch.bind(window);
+  window.fetch = (url, opts = {}) => f(url, { ...opts, headers: { ...(opts.headers || {}), 'x-lebot-key': k } });
+})();
+</script>
+
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LeBot — Science Bowl</title>

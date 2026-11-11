@@ -450,7 +450,7 @@ async def _stream():
         with _lock:
             state["err"] = "DEEPGRAM_API_KEY missing — add it to .env"
         return
-    client = httpx.AsyncClient(timeout=40)
+    client = httpx.AsyncClient(timeout=40, headers={"x-lebot-key": os.environ.get("LEBOT_KEY", "")})
     while True:
         try:
             async with websockets.connect(
