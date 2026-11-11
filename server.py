@@ -90,6 +90,14 @@ class AnalyzeReq(BaseModel):
 _nsba4 = json.loads(Path("nsba4_questions.json").read_text())
 
 
+@app.on_event("startup")
+def _warm():
+    """First live check after a restart took 8 s (client + TLS setup); pay that before anyone reads."""
+    import threading
+    threading.Thread(target=lambda: answerer.anticipate_fast_confirm(
+        "This organelle is the powerhouse of the cell", "BIOLOGY", n=1, haiku=False), daemon=True).start()
+
+
 @app.get("/")
 def index():
     return HTMLResponse(Path("lebot.html").read_text())
