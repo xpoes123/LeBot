@@ -12,12 +12,9 @@ import json
 import math
 import os
 
-import numpy as np
-from sklearn.linear_model import LogisticRegression
+import re
 
-import data
-import measure
-from buzzer import CATS
+from buzzer import CATS   # the server imports this module: keep it free of live/measure (desktop-only deps)
 
 SETS = ["stanford-science-bowl", "johns-hopkins-invitational", "dasoni-2", "stanford-college-plus-science-bowl"]
 JUDGE_CACHE = os.path.join(os.path.dirname(__file__), ".cache_judge.json")
@@ -34,12 +31,16 @@ def p_correct(rec, i):
     return 1 / (1 + math.exp(-z)), _w["T"]
 
 
+def _norm(s):
+    return " ".join(re.sub(r"[^\w\s]", " ", (s or "").lower()).split())   # == live._norm_answer
+
+
 def feats(rec, i):
     """Features at tick i, from ticks 0..i only (everything live knows at that moment)."""
     prev, run, arun, seen = None, 0, 0, set()
     for (g, agrees), _j in list(zip(rec["seq"], rec["idx"]))[: i + 1]:
         unk = not g or g.upper() == "UNKNOWN"
-        ng = None if unk else measure._norm_answer(g)
+        ng = None if unk else _norm(g)
         run = 0 if unk else (run + 1 if ng == prev else 1)
         arun = arun + 1 if (agrees and ng == prev) else (1 if agrees else 0)
         prev = ng
@@ -53,6 +54,8 @@ def feats(rec, i):
 
 def load(judge):
     """-> {set: [(rec, human_word, X, y)]} over cached trajectories."""
+    import data
+    import measure
     cache = json.load(open(measure.CACHE))
     out = {}
     for name in SETS:
@@ -70,6 +73,8 @@ def load(judge):
 
 
 def fit(rows):
+    import numpy as np
+    from sklearn.linear_model import LogisticRegression
     X = np.array([x for r in rows for x in r[2]])
     y = np.array([v for r in rows for v in r[3]])
     return LogisticRegression(max_iter=2000, class_weight="balanced").fit(X, y)
@@ -91,6 +96,9 @@ def judge_cached():
 
 
 if __name__ == "__main__":
+    import numpy as np
+
+    import measure
     judge = judge_cached()
     by_set = load(judge)
     for held in SETS:
