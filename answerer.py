@@ -336,13 +336,13 @@ def mc_fast(prefix, category, model=None):
 QUICK_MODEL = "claude-opus-4-8"   # 17/21 calc tossups, median 1.3 s / p90 1.7 s (Sonnet 16/21 at 1.7/2.1 s, Haiku 15/21)
 
 
-def quick_compute(prefix, category, k=3):
+def quick_compute(prefix, category, k=3, bet=False):
     """Answer a computational tossup inside the ~2 s answer window: k parallel Opus solves, majority value
     (one solve is right ~75% of the time on the springs question; wall time ~= one solve)."""
     from concurrent.futures import as_completed
     ex = ThreadPoolExecutor(max_workers=k)
     vals = []
-    for f in as_completed([ex.submit(_quick_once, prefix, category) for _ in range(k)]):
+    for f in as_completed([ex.submit(_quick_once, prefix, category, bet) for _ in range(k)]):
         v = f.result()
         if v and v.upper() != "UNKNOWN":
             vals.append(v)
@@ -357,12 +357,15 @@ def _norm_ans(v):
     return re.sub(r"\s+", "", (v or "").lower())
 
 
-def _quick_once(prefix, category):
+def _quick_once(prefix, category, bet=False):
     """One solve: a few terse lines of work, then the value. (solve()'s code-writing path takes 6-9 s and Sonnet
     second-guesses itself past any short budget.)"""
     r = _call(
         META_SA.format(category=category),
-        f"Live buzz race, SHORT-ANSWER computational tossup:\n\"{prefix}\"\n\nSolve it fast: at most 3 terse lines "
+        f"Live buzz race, SHORT-ANSWER computational tossup:\n\"{prefix}\"\n\n"
+        + ("If it was cut off before saying what it asks, bet on the quantity it will most likely ask for given this "
+           "setup and solve for that. " if bet else "")
+        + "Solve it fast: at most 3 terse lines "
         "of work (no restating, no second-guessing), then a final line `ANSWER: <value only>` in exact simplest "
         "form, units omitted.",
         max_tokens=150, temperature=0.0, model=QUICK_MODEL)

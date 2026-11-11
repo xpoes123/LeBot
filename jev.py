@@ -53,6 +53,13 @@ CALC_CRITERIA = {
 }
 
 
+SETUP_CRITERIA = {
+    "yes": "the problem's setup is complete: every quantity it gives has been stated, so the most natural question "
+           "about it could be computed now (even if the question hasn't said exactly what it asks yet)",
+    "no": "the setup is still being described: more quantities or conditions are clearly coming",
+}
+
+
 TYPE_CRITERIA = {
     "compute": "a computational problem: the answer will be worked out from given numbers or a setup (a value, "
                "count, probability, energy...)",
@@ -61,27 +68,30 @@ TYPE_CRITERIA = {
 
 
 def qtype_ready(text, cat, timeout=2.0):
-    """One call, two reads of the question text alone: P(it's a calculation) and P(a top player could buzz now and
-    compute it in 2 s). -> (p_compute, p_ready), or (None, None) when Jev is unavailable. Separates early: springs
-    0.61 by "spring constant", "ball dropped from 20 m" 0.98, wolves / "this element with atomic number 26" 0.00."""
+    """One call, three reads of the question text alone: P(it's a calculation), P(a top player could buzz now and
+    compute it in 2 s) and P(the setup has given all its numbers, ask maybe not yet stated — full send bets there).
+    -> (p_compute, p_ready, p_setup), or (None, None, None) when Jev is unavailable. Separates early: springs 0.61
+    by "spring constant", "ball dropped from 20 m" 0.98, wolves / "this element with atomic number 26" 0.00."""
     if not os.environ.get("JEV_API_KEY"):
-        return None, None
+        return None, None, None
     try:
         r = requests.post(URL, timeout=timeout, headers={"Authorization": f"Bearer {os.environ['JEV_API_KEY']}"},
                           json={"model": "jev-latest", "questions": {
                               "type": {"type": "choice", "criteria": TYPE_CRITERIA,
                                        "question": "What kind of question is this turning out to be?"},
                               "ready": {"type": "choice", "criteria": CALC_CRITERIA,
-                                        "question": "Could a top player buzz now and compute the answer in 2 seconds?"}},
+                                        "question": "Could a top player buzz now and compute the answer in 2 seconds?"},
+                              "setup": {"type": "choice", "criteria": SETUP_CRITERIA,
+                                        "question": "Has the setup given all of its numbers yet?"}},
                               "state": f"National Science Bowl short-answer tossup, category {cat}, being read aloud "
                                        f"(live transcript). Heard so far:\n\"{text}\""})
         r.raise_for_status()
         a = r.json()["answers"]
     except Exception:
-        return None, None
+        return None, None, None
 
     def p(x, label):
         if "probabilities" in x:
             return float(x["probabilities"][label])
         return x["confidence"] if x["choice"] == label else 1 - x["confidence"]
-    return p(a["type"], "compute"), p(a["ready"], "yes")
+    return p(a["type"], "compute"), p(a["ready"], "yes"), p(a["setup"], "yes")
