@@ -301,7 +301,21 @@ def mc_past_y(prefix):
     return bool(x and _MC_Y.search(prefix, x.end()))
 
 
-def mc_commit(prefix, category):
+def mc_commit(prefix, category, k=3):
+    """Majority of k parallel commits (Opus takes no temperature, so single answers vary); returns once 2 agree."""
+    from concurrent.futures import as_completed
+    ex = ThreadPoolExecutor(max_workers=k)
+    got = []
+    for f in as_completed([ex.submit(_mc_commit_once, prefix, category) for _ in range(k)]):
+        got.append(f.result())
+        if got.count(got[-1]) >= 2:
+            ex.shutdown(wait=False)
+            return got[-1]
+    ex.shutdown(wait=False)
+    return Counter(got).most_common(1)[0][0]
+
+
+def _mc_commit_once(prefix, category):
     """Choice Y is being read (W, X done): strong players buzz NOW and decide in the answer window.
     Value-first, like a player: name what the right choice must say from knowledge, then match it to the
     choices heard, allowing for mis-hearing (live ASR turns "fetch" into "Dutch") — never pick a choice
@@ -311,11 +325,17 @@ def mc_commit(prefix, category):
         f"A multiple-choice tossup is being read aloud. This is a LIVE SPEECH TRANSCRIPT: words are often "
         f"mis-heard as similar-sounding words. Choices W and X have been read, Y is being read, Z may not have "
         f"been read yet:\n\"{prefix}...\"\n\n"
-        "You have buzzed. Step 1: from your own knowledge, what must the correct choice SAY? Step 2: compare it "
-        "to W, X and Y as heard — a choice matches if it means the same thing or SOUNDS like it. A garbled word "
-        "is a mis-hearing of the real choice, not a nonsense option. If none of W, X, Y matches, the answer is Z.\n"
-        "Reply in exactly this form: EXPECT: <what the right choice says> | LETTER: <W, X, Y or Z>",
-        max_tokens=40, temperature=0.0)
+        "You have buzzed. First silently restate the question in proper science vocabulary — a word that doesn't "
+        "fit is a mis-hearing of the similar-sounding science term (choices included), never a literal word.\n"
+        "If the question is COMPARATIVE (which of the following has the most / least / highest / largest ...): the "
+        "answer is the best AMONG THE CHOICES, not an absolute record-holder. Choices follow a pattern (e.g. LiBr, "
+        "LiI, NaBr -> Z is almost surely NaI; heard only 'LiBr, LiI, Na' -> Y is NaBr and Z is NaI), so complete a "
+        "cut-off Y and the unread Z from the pattern, then pick the best of all four.\n"
+        "Otherwise: from your own knowledge, what must the correct choice SAY? A choice matches if it means the "
+        "same thing or sounds like it; if none of W, X, Y matches, the answer is Z.\n"
+        "Reply with ONLY this one line and nothing else: EXPECT: <what the right choice says, or the inferred Z for "
+        "comparisons> | LETTER: <W, X, Y or Z>",
+        max_tokens=120, temperature=0.0, model=QUICK_MODEL)   # Sonnet thinks aloud past the budget -> no LETTER
     m = re.search(r"LETTER:\s*([WXYZ])\b", r.upper())
     return m.group(1) if m else "Z"
 
@@ -328,8 +348,10 @@ def mc_fast(prefix, category, model=None):
         META_SA.format(category=category),
         f"A multiple-choice tossup is being read aloud; the choices come in order W, X, Y, Z and the "
         f"last one heard may be cut off. Heard so far:\n\"{prefix}...\"\n\n"
-        "Reply with ONLY the letter of the correct choice if you can already tell. That includes "
-        "elimination, which strong players use: if the question asks which is NOT / EXCEPT / LEAST and "
+        "Reply with ONLY the letter of the correct choice if you can already tell. "
+        "COMPARATIVE questions (which has the most / least / highest / largest ...): never answer before choice Y "
+        "has started — a later choice can beat the best one so far; reply UNKNOWN. "
+        "Elimination, which strong players use: if the question asks which is NOT / EXCEPT and "
         "W, X and Y have all been read and each is clearly NOT the answer, reply Z right away — "
         "before Z is read. Otherwise reply UNKNOWN.\nLetter:",
         max_tokens=5, temperature=0.0, model=model)
