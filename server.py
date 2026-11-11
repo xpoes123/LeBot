@@ -208,7 +208,9 @@ async def upload_packet(
 @app.post("/analyze")
 def analyze(req: AnalyzeReq):
     if req.fast:  # low-latency live path: Sonnet lean + independent Haiku confirm, no verbose/calc
-        if req.final and not answerer.is_mc(req.prefix) and answerer.is_computational(req.prefix, req.category):
+        if req.final and not answerer.is_mc(req.prefix) and (
+                answerer.is_computational(req.prefix, req.category)
+                or (jev.qtype_ready(req.prefix, req.category)[0] or 0) >= 0.5):
             guess = answerer.quick_compute(req.prefix, req.category)
             return {"guess": guess, "reasoning": "", "mode": "quick-compute", "agrees": None, "p_jev": None,
                     "p_gate": None, "gate_T": None, "gate_buzz": False}
@@ -218,17 +220,23 @@ def analyze(req: AnalyzeReq):
             return {"guess": guess, "reasoning": "", "mode": "mc-commit", "agrees": None, "p_jev": None,
                     "p_gate": 1.0, "gate_T": None, "gate_buzz": True}
         _t, force, need_agree = MODES.get(req.mode, MODES["balanced"])
-        calc = answerer.is_computational(req.prefix, req.category) and not answerer.is_mc(req.prefix)
+        mc = answerer.is_mc(req.prefix)
         with ThreadPoolExecutor(max_workers=2) as ex:
-            # calc tossups: Jev judges readiness from the text alone (the running guess can't compute mid-read)
-            f_ready = ex.submit(jev.calc_ready, req.prefix, req.category) if calc else None
+            # Jev reads the question text: calculation or recall? and if calculation, computable yet?
+            f_type = ex.submit(jev.qtype_ready, req.prefix, req.category) if not mc else None
             guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
                 req.prefix, req.category, n=1, force=force, haiku=need_agree)
-            ready = f_ready.result() if f_ready else None
-        if ready is not None and ready >= CALC_T.get(req.mode, 0.8):
-            # buzz now; the client asks for the answer at once (final=true -> Opus quick-compute in the window)
-            return {"guess": "…", "reasoning": "", "mode": "calc-ready", "agrees": None, "p_jev": ready,
-                    "p_gate": round(ready, 3), "gate_T": CALC_T.get(req.mode, 0.8), "gate_buzz": True}
+            p_calc, ready = f_type.result() if f_type else (None, None)
+        if p_calc is None:   # Jev down: fall back to "numbers present"
+            p_calc = 1.0 if (not mc and answerer.is_computational(req.prefix, req.category)) else 0.0
+        if p_calc >= 0.5:
+            # calculation: never buzz on a guessed topic — only once it's computable; the client then asks for
+            # the answer (final=true -> Opus quick-compute x3 in the window)
+            t = CALC_T.get(req.mode, 0.8)
+            fire = ready is not None and ready >= t
+            return {"guess": "…" if fire else guess, "reasoning": "", "mode": "calc-ready" if fire else "calc-wait",
+                    "agrees": None, "p_jev": ready, "p_calc": round(p_calc, 2), "p_gate": ready, "gate_T": t,
+                    "gate_buzz": fire}
         guess = _mc_letter(guess, req.prefix)
         buzz = _buzz_features(req, guess, mode, haiku)
         return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode, req.prefix)}
