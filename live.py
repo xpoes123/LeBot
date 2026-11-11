@@ -220,13 +220,14 @@ async def _run(ws, client):
         took = {"overread": False}
 
         async def overread():
-            await asyncio.sleep(OVERREAD_S)
-            heard = state["transcript"]
-            if state["gen"] != gen or len(heard.split()) <= len(qtext.split()):
+            # early buzz: wait for the overread; end of question: answer now (calc -> quick compute, ~1.3 s)
+            await asyncio.sleep(OVERREAD_S if commit else 0)
+            heard = state["transcript"] if commit else qtext
+            if state["gen"] != gen or (commit and len(heard.split()) <= len(qtext.split())):
                 return
             try:
                 d = (await client.post(f"{LEBOT_URL}/analyze", json={
-                    "prefix": heard, "category": cat or "OTHER", "fast": True, "mode": MODE,
+                    "prefix": heard, "category": cat or "OTHER", "fast": True, "mode": MODE, "final": True,
                     "total_words": est_total(len(heard.split())), "history": leans})).json()
             except Exception:
                 return
@@ -235,8 +236,7 @@ async def _run(ws, client):
                 if (state["gen"] == gen and g and g.upper() != "UNKNOWN"
                         and time.monotonic() - t_buzz <= ANSWER_WINDOW):
                     state["answer"], took["overread"] = g, True
-        if commit:
-            asyncio.create_task(overread())
+        asyncio.create_task(overread())
 
         async def finalize():
             try:
@@ -254,7 +254,7 @@ async def _run(ws, client):
                     # past the answer window: the spoken answer is locked; only fill in the walkthrough
                     if d and d.get("reasoning"):
                         state.update(reasoning=d["reasoning"], resmode=d.get("mode", state["resmode"]))
-                elif g and g.upper() != "UNKNOWN":
+                elif g and g.upper() != "UNKNOWN" and (in_window or not took["overread"]):   # spoken answer stands after 2 s
                     state.update(answer=g, reasoning=d.get("reasoning", ""), resmode=d.get("mode", ""))
                 elif not quick:  # nothing shown and nothing found
                     state.update(answer="UNKNOWN",
