@@ -255,6 +255,12 @@ def analyze(req: AnalyzeReq):
         else:
             # calculation: never buzz on a guessed topic — only once it's computable; the client then asks for
             # the answer (final=true -> Opus quick-compute x3 in the window)
+            if req.final:   # the answer step never returns "pending": compute it (Jev may call it calc even
+                            # when the digit/number-word check doesn't, e.g. "three charges q, q, and -q")
+                guess = answerer.quick_compute(req.prefix, req.category,
+                                               bet=req.mode == "full" and not answerer.asked_yet(req.prefix))
+                return {"guess": guess, "reasoning": "", "mode": "quick-compute", "agrees": None, "p_jev": None,
+                        "p_gate": None, "gate_T": None, "gate_buzz": False}
             t = CALC_T.get(req.mode, 0.8)
             fire = ready is not None and ready >= t
             if req.mode == "full" and not fire and setup is not None and setup >= SETUP_T:
