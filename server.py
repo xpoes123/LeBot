@@ -57,6 +57,7 @@ def _p_buzz(feats, prefix, category, traj):
     return float(_clf_jev.predict_proba(np.append(feats, [[pj]], axis=1))[0, 1]), pj
 
 BUZZ_T = 0.75  # raised from 0.70 — old threshold was tuned on Haiku-primary data
+_EX = ThreadPoolExecutor(max_workers=16)   # fast-path guesses that a stale-guess buzz may return ahead of
 
 
 def _norm(s):
@@ -278,8 +279,24 @@ def analyze(req: AnalyzeReq):
         if p_calc is None:   # Jev down: fall back to "numbers present"
             p_calc = 1.0 if (not mc and answerer.is_computational(req.prefix, req.category)) else 0.0
         if p_calc < 0.5:
-            guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
-                req.prefix, req.category, n=1, force=force, haiku=need_agree)
+            # Judge the LATEST COMPLETED guess against the words heard since, at Jev speed (~0.15 s), while Sonnet
+            # re-guesses (~1 s). When the running guess is right it has usually settled a few ticks earlier, so the
+            # buzz lands ~3 words sooner than waiting for a fresh guess (held out: median 76% -> 71% of the stem,
+            # same accuracy — the inputs to Jev are the same, only sooner).
+            prev = _latest_guess(req)
+            f_guess = _EX.submit(answerer.anticipate_fast_confirm, req.prefix, req.category, n=1, force=force,
+                                 haiku=need_agree)
+            if prev and not need_agree:   # confident mode needs Haiku's agreement: no stale-guess buzz there
+                traj = sorted(((h.words - 1, h.guess) for h in req.history if h.words
+                               and h.guess and h.guess.upper() != "UNKNOWN"), key=lambda t: t[0])
+                p_prev = jev.p_correct(req.prefix, req.category, traj)
+                g0 = _gate(prev, {"p_jev": p_prev, "agrees": None}, req.mode, req.prefix)
+                if g0["gate_buzz"]:
+                    return {"guess": prev, "reasoning": "", "mode": "recall", "stability_run": 0, "churn": 0,
+                            "frac": 0, "p_buzz": p_prev, "p_jev": p_prev, "buzzes": True, "haiku_vote": None,
+                            "agrees": None, "stale": True, **g0}
+            guess, haiku, mode = f_guess.result()
+            p_known = p_prev if prev and not need_agree and _norm(guess) == _norm(prev) else None   # same inputs: reuse
         else:
             # calculation: never buzz on a guessed topic — only once it's computable; the client then asks for
             # the answer (final=true -> Opus quick-compute x3 in the window)
@@ -297,7 +314,7 @@ def analyze(req: AnalyzeReq):
                     "agrees": None, "p_jev": ready, "p_calc": round(p_calc, 2), "p_gate": ready, "gate_T": t,
                     "gate_buzz": fire}
         guess = _mc_letter(guess, req.prefix)
-        buzz = _buzz_features(req, guess, mode, haiku)
+        buzz = _buzz_features(req, guess, mode, haiku, p_known)
         return {"guess": guess, "reasoning": "", **buzz, **_gate(guess, buzz, req.mode, req.prefix)}
     # Run both in parallel — Sonnet verbose is already the latency bottleneck,
     # so using its answer costs nothing. Haiku votes give stability features + agreement.
@@ -355,8 +372,17 @@ def _gate(guess: str, buzz: dict, mode: str, prefix: str = ""):
     return {"p_gate": p, "gate_T": t, "gate_buzz": ok}
 
 
-def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
-    """Shared buzzer feature computation used by both endpoints."""
+def _latest_guess(req: AnalyzeReq):
+    """The most recent named guess the client has heard back, if it's recent (overlapping ticks run ~3 words behind)."""
+    named = [h for h in req.history if h.guess and h.guess.upper() != "UNKNOWN" and h.words]
+    if not named:
+        return None
+    last = max(named, key=lambda h: h.words)
+    return last.guess if len(req.prefix.split()) - last.words <= 8 else None
+
+
+def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str, p_known=None):
+    """Shared buzzer feature computation used by both endpoints. p_known: Jev's P for this guess, already fetched."""
     words_heard = len(req.prefix.split())
     total = max(req.total_words, words_heard)
     frac = words_heard / total
@@ -377,7 +403,10 @@ def _buzz_features(req: AnalyzeReq, guess: str, mode: str, haiku_guess: str):
                        np.log1p(total), is_calc] + cat_vec])
     traj = [] if is_unk else [((h.words - 1) if h.words else None, h.guess) for h in req.history
                               if h.guess and h.guess.upper() != "UNKNOWN"] + [(words_heard - 1, guess)]
-    p, p_jev = _p_buzz(feats, req.prefix, req.category, traj)
+    if p_known is not None:
+        p, p_jev = float(_clf_jev.predict_proba(np.append(feats, [[p_known]], axis=1))[0, 1]), p_known
+    else:
+        p, p_jev = _p_buzz(feats, req.prefix, req.category, traj)
     haiku_no_guess = not haiku_guess or haiku_guess.upper() == "UNKNOWN"
     agrees = _norm(haiku_guess) == _norm(guess) if not is_unk and not haiku_no_guess else None
     # Both models have guesses but disagree → penalize confidence
