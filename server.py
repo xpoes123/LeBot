@@ -286,7 +286,8 @@ def analyze(req: AnalyzeReq):
             prev = _latest_guess(req)
             f_guess = _EX.submit(answerer.anticipate_fast_confirm, req.prefix, req.category, n=1, force=force,
                                  haiku=need_agree)
-            if prev and not need_agree:   # confident mode needs Haiku's agreement: no stale-guess buzz there
+            if prev and not need_agree and not req.final:   # confident mode needs Haiku's agreement; the answer step
+                                                           # wants the freshest guess, not the stale one
                 traj = sorted(((h.words - 1, h.guess) for h in req.history if h.words
                                and h.guess and h.guess.upper() != "UNKNOWN"), key=lambda t: t[0])
                 p_prev = jev.p_correct(req.prefix, req.category, traj)
@@ -296,7 +297,7 @@ def analyze(req: AnalyzeReq):
                             "frac": 0, "p_buzz": p_prev, "p_jev": p_prev, "buzzes": True, "haiku_vote": None,
                             "agrees": None, "stale": True, **g0}
             guess, haiku, mode = f_guess.result()
-            p_known = p_prev if prev and not need_agree and _norm(guess) == _norm(prev) else None   # same inputs: reuse
+            p_known = p_prev if prev and not need_agree and not req.final and _norm(guess) == _norm(prev) else None
         else:
             # calculation: never buzz on a guessed topic — only once it's computable; the client then asks for
             # the answer (final=true -> Opus quick-compute x3 in the window)
