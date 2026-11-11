@@ -186,7 +186,7 @@ def _reason_text(mode, reasoning):
     return reasoning
 
 
-JEV_T = 0.8   # held out (563 Qs): buzz@~70% of stem, ~78% acc — human in-stem buzzes: 65-69%, 69-81%
+JEV_T = 0.6   # aggressive (demo): held out buzzes 75% of Qs @~69%, 72% acc; 0.8 -> 70% @70%, 78%
 
 
 def _gate(guess: str, buzz: dict):
