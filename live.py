@@ -24,6 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import httpx
+
+import answerer
 import websockets
 
 from listen import _default_monitor
@@ -262,6 +264,25 @@ async def _run(ws, client):
                 _log_locked(qtext, state["answer"], state["reasoning"], state["resmode"], cat)
         asyncio.create_task(finalize())
 
+    async def mc_buzz(qtext, words, gen, cat):
+        # MC past Y (answerer.mc_past_y, a pattern check, no API): buzz at once; the answer — and the overread
+        # re-answer — land inside the 2 s window.
+        nonlocal committed, answered, answered_words
+        committed, answered, answered_words = True, True, words
+        with _lock:
+            if state["gen"] == gen:
+                state.update(answer="…", buzz=True, mode="waiting", refining=True)
+        try:
+            d = (await client.post(f"{LEBOT_URL}/analyze", json={
+                "prefix": qtext, "category": cat or "OTHER", "fast": True, "mode": MODE,
+                "total_words": est_total(words), "history": leans})).json()
+        except Exception:
+            d = {}
+        g = d.get("guess", "")
+        if g and g.upper() != "UNKNOWN":
+            pre.update(words=words, answer=g, reasoning="buzzed after Y", mode="mc-commit")
+        await answer_now(qtext, gen, cat, commit=True)
+
     async def confirm(qtext, words, gen, cat):
         # The live lean AND the early-buzz decision: the fast path returns Sonnet's running guess
         # and Jev's call on it (gate_buzz). Jev says buzz -> commit; Sonnet finalizes in the window.
@@ -345,6 +366,9 @@ async def _run(ws, client):
                 nopts = len(set(re.findall(r"\b[wxyz]\b", qtext.lower())))
                 if nopts > seen_opts:
                     seen_opts, new_option = nopts, True
+            if not committed and "multiple" in state["qformat"] and answerer.mc_past_y(qtext):
+                committed = True
+                asyncio.create_task(mc_buzz(qtext, nwords, my_gen, state["category"]))
             if (nwords >= last_think + THINK_STEP or new_option) and len(think_inflight) < THINK_MAX:
                 last_think = nwords
                 t = asyncio.create_task(confirm(qtext, nwords, my_gen, state["category"]))

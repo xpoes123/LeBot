@@ -132,6 +132,15 @@ async function tick(n, my) {
   } finally { inflight--; }
 }
 
+// same rule as answerer.mc_past_y: MC (announced, or "W," punctuated) and Y's text has started -> buzz now
+function mcPastY(t) {
+  if (!(/multiple[- ]?choice/i.test(t.slice(0, 150)) || /(?:^|[\s.,;:?])w[,.:)]\s/i.test(t))) return false;
+  const at = (re, from) => { const m = re.exec(t.slice(from)); return m ? from + m.index + m[0].length : -1; };
+  const w = at(/(?:^|[\s.,;:?])w[,.:)]?\s+[a-z0-9]/i, 0); if (w < 0) return false;
+  const x = at(/(?:^|[\s.,;:])x[,.:)]?\s+[a-z0-9]/i, w); if (x < 0) return false;
+  return at(/(?:^|[\s.,;:])(?:y|why)[,.:)]?\s+[a-z0-9]/i, x) >= 0;
+}
+
 function doBuzz(guess, decidedAt, my) {
   const at = words().length;
   buzzed = { at, guess, decidedAt };
@@ -231,6 +240,16 @@ async function startMic() {
     render();
     if (!tr) return;
     const n = words().length;
+    if (!ended && !buzzed && mcPastY(heardText())) {   // MC past Y: buzz first, answer inside the 2 s window
+      doBuzz('…', n, my);
+      const t = performance.now();
+      analyze(heardText(), true).then(d => {
+        if (my !== gen || !buzzed || buzzed.over || !d.guess || d.guess.toUpperCase() === 'UNKNOWN') return;
+        buzzed.guess = d.guess; $('buzz').textContent = 'BUZZ — ' + d.guess;
+        $('buzzat').textContent += ` · answered ${d.guess} at ${Math.round(performance.now() - t)} ms`;
+      }).catch(() => {});
+      return;
+    }
     if (!ended && !buzzed && n >= 3 && n > checked && inflight < 3) { checked = n; tick(n, my); }   // newest word, up to 3 in flight
     // (silence messages returned above, so only real words reset the end-of-question timer)
     clearTimeout(silenceT);    // ~2 s of silence after speech = end of question
