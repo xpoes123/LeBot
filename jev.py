@@ -18,7 +18,8 @@ def state(text, cat, traj):
     """traj = [(word_index or None, guess), ...] of the non-UNKNOWN guesses so far, current last."""
     hist = "; ".join(g if w is None else f"after {w + 1} words: {g}" for w, g in traj)
     return (f"National Science Bowl short-answer tossup, category {cat}. The question is being read aloud "
-            f"and has been cut off mid-stream. Heard so far:\n\"{text}\"\n\n"
+            f"and has been cut off mid-stream (live speech transcript: words may be mis-heard; read them as the "
+            f"similar-sounding words that make sense). Heard so far:\n\"{text}\"\n\n"
             f"A player's guesses so far ({hist}). Their current guess: {traj[-1][1]}")
 
 
@@ -84,7 +85,8 @@ def qtype_ready(text, cat, timeout=2.0):
                               "setup": {"type": "choice", "criteria": SETUP_CRITERIA,
                                         "question": "Has the setup given all of its numbers yet?"}},
                               "state": f"National Science Bowl short-answer tossup, category {cat}, being read aloud "
-                                       f"(live transcript). Heard so far:\n\"{text}\""})
+                                       f"(live speech transcript: words may be mis-heard; read them as the "
+                                       f"similar-sounding words that make sense). Heard so far:\n\"{text}\""})
         r.raise_for_status()
         a = r.json()["answers"]
     except Exception:

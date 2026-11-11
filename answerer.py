@@ -30,6 +30,10 @@ if os.path.exists(_ENV):
             os.environ.setdefault(_k, _v)
 
 LETTERS = ["W", "X", "Y", "Z"]
+# live play reads Deepgram's transcript: words get mis-heard ("zero Loretz length" for zero rest length)
+ASR_NOTE = ("This is a LIVE SPEECH TRANSCRIPT: words are often mis-heard as similar-sounding words or merged "
+            "(e.g. \"for tea\" for \"forty\"). Read every word as the similar-sounding word that makes sense in a "
+            "science question before deciding anything.\n\n")
 MODEL = os.environ.get("LEBOT_MODEL", "claude-sonnet-4-6")       # System 2: thinking
 FAST = os.environ.get("LEBOT_FAST", "claude-haiku-4-5-20251001")  # System 1: subconscious
 # Homelab Ollama (Tailscale) for the offline judge only; empty OLLAMA_URL = disabled.
@@ -257,7 +261,7 @@ def anticipate_sa(prefix, category, n=1, model=None, force=False):
     def one(_):
         r = _call(
             sys,
-            f"This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
+            f"{ASR_NOTE}This SHORT-ANSWER question is cut off mid-reading:\n\"{prefix}...\"\n\n"
             "Give ONLY the answer itself — a single term, name, or value, at most a few "
             "words (e.g. \"mitochondria\", \"contact metamorphism\", \"36 mph\"). "
             "NO sentence, NO explanation, do not write \"X is...\". "
@@ -362,7 +366,7 @@ def _quick_once(prefix, category, bet=False):
     second-guesses itself past any short budget.)"""
     r = _call(
         META_SA.format(category=category),
-        f"Live buzz race, SHORT-ANSWER computational tossup:\n\"{prefix}\"\n\n"
+        f"{ASR_NOTE}Live buzz race, SHORT-ANSWER computational tossup:\n\"{prefix}\"\n\n"
         + ("If it was cut off before saying what it asks, bet on the quantity it will most likely ask for given this "
            "setup and solve for that. " if bet else "")
         + "Solve it fast: at most 3 terse lines "
