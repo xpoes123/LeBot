@@ -339,9 +339,22 @@ QUICK_MODEL = "claude-opus-4-8"   # 17/21 calc tossups, median 1.3 s / p90 1.7 s
 def quick_compute(prefix, category, k=3):
     """Answer a computational tossup inside the ~2 s answer window: k parallel Opus solves, majority value
     (one solve is right ~75% of the time on the springs question; wall time ~= one solve)."""
-    with ThreadPoolExecutor(max_workers=k) as ex:
-        vals = [v for v in ex.map(lambda _: _quick_once(prefix, category), range(k)) if v and v.upper() != "UNKNOWN"]
+    from concurrent.futures import as_completed
+    ex = ThreadPoolExecutor(max_workers=k)
+    vals = []
+    for f in as_completed([ex.submit(_quick_once, prefix, category) for _ in range(k)]):
+        v = f.result()
+        if v and v.upper() != "UNKNOWN":
+            vals.append(v)
+            if sum(_norm_ans(x) == _norm_ans(v) for x in vals) >= 2:   # two agree: answer now, don't wait
+                ex.shutdown(wait=False)
+                return v
+    ex.shutdown(wait=False)
     return _vote(vals) if vals else "UNKNOWN"
+
+
+def _norm_ans(v):
+    return re.sub(r"\s+", "", (v or "").lower())
 
 
 def _quick_once(prefix, category):

@@ -221,20 +221,21 @@ def analyze(req: AnalyzeReq):
                     "p_gate": 1.0, "gate_T": None, "gate_buzz": True}
         _t, force, need_agree = MODES.get(req.mode, MODES["balanced"])
         mc = answerer.is_mc(req.prefix)
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            # Jev reads the question text: calculation or recall? and if calculation, computable yet?
-            f_type = ex.submit(jev.qtype_ready, req.prefix, req.category) if not mc else None
-            guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
-                req.prefix, req.category, n=1, force=force, haiku=need_agree)
-            p_calc, ready = f_type.result() if f_type else (None, None)
+        # Jev first (~0.1 s): a calculation needs no running guess, so answer at Jev speed and skip Sonnet's ~1 s
+        # (and its tokens) — only recall tossups pay for the guess.
+        p_calc, ready = jev.qtype_ready(req.prefix, req.category) if not mc else (None, None)
+        guess = haiku = mode = None
         if p_calc is None:   # Jev down: fall back to "numbers present"
             p_calc = 1.0 if (not mc and answerer.is_computational(req.prefix, req.category)) else 0.0
-        if p_calc >= 0.5:
+        if p_calc < 0.5:
+            guess, haiku, mode = answerer.anticipate_fast_confirm(   # Haiku only where it gates (halves API load)
+                req.prefix, req.category, n=1, force=force, haiku=need_agree)
+        else:
             # calculation: never buzz on a guessed topic — only once it's computable; the client then asks for
             # the answer (final=true -> Opus quick-compute x3 in the window)
             t = CALC_T.get(req.mode, 0.8)
             fire = ready is not None and ready >= t
-            return {"guess": "…" if fire else guess, "reasoning": "", "mode": "calc-ready" if fire else "calc-wait",
+            return {"guess": "…" if fire else "UNKNOWN", "reasoning": "", "mode": "calc-ready" if fire else "calc-wait",
                     "agrees": None, "p_jev": ready, "p_calc": round(p_calc, 2), "p_gate": ready, "gate_T": t,
                     "gate_buzz": fire}
         guess = _mc_letter(guess, req.prefix)
