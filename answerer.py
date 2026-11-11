@@ -299,17 +299,20 @@ def mc_past_y(prefix):
 
 def mc_commit(prefix, category):
     """Choice Y is being read (W, X done): strong players buzz NOW and decide in the answer window.
-    Forced letter; transcription may garble words ("fetch" -> "Dutch")."""
+    Value-first, like a player: name what the right choice must say from knowledge, then match it to the
+    choices heard, allowing for mis-hearing (live ASR turns "fetch" into "Dutch") — never pick a choice
+    just because its garbled text happens to fit."""
     r = _call(
         META_SA.format(category=category),
-        f"A multiple-choice tossup is being read aloud (live transcript, may contain mis-heard words); choices "
-        f"W and X have been read and Y is being read, Z may not have been read yet:\n\"{prefix}...\"\n\n"
-        "A choice that makes no sense here was almost certainly mis-heard: read it as the plausible scientific term "
-        "it sounds like (e.g. \"catch mint\" -> catchment) — never pick a choice just because its transcript is "
-        "nonsense. You have buzzed and must commit now. Reply with ONLY one letter: the choice among W, X, Y that "
-        "answers the question, or Z if none of them does.\nLetter:",
-        max_tokens=5, temperature=0.0)
-    m = re.match(r"\s*([WXYZ])\b", r.upper())
+        f"A multiple-choice tossup is being read aloud. This is a LIVE SPEECH TRANSCRIPT: words are often "
+        f"mis-heard as similar-sounding words. Choices W and X have been read, Y is being read, Z may not have "
+        f"been read yet:\n\"{prefix}...\"\n\n"
+        "You have buzzed. Step 1: from your own knowledge, what must the correct choice SAY? Step 2: compare it "
+        "to W, X and Y as heard — a choice matches if it means the same thing or SOUNDS like it. A garbled word "
+        "is a mis-hearing of the real choice, not a nonsense option. If none of W, X, Y matches, the answer is Z.\n"
+        "Reply in exactly this form: EXPECT: <what the right choice says> | LETTER: <W, X, Y or Z>",
+        max_tokens=40, temperature=0.0)
+    m = re.search(r"LETTER:\s*([WXYZ])\b", r.upper())
     return m.group(1) if m else "Z"
 
 
