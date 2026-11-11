@@ -121,7 +121,8 @@ THINK_STEP = 1        # words between fast checks (Sonnet guess + Jev buzz call)
 THINK_MAX = 3         # fast checks in flight at once (~0.85 s each vs ~0.37 s per word)
 END_TIMEOUT = 18.0    # hard cap on the final solve (Opus-retry math can be ~12s); then fall back
 MODE = os.environ.get("LEBOT_MODE", "balanced")   # full | balanced | confident (server.MODES)
-ANSWER_WINDOW = 2.0   # after an early buzz, Sonnet has ~2 s (NSB) to finalize before we must answer
+ANSWER_WINDOW = 2.0
+OVERREAD_S = 1.0      # after a buzz the reader often keeps going: re-answer with what's heard ~1 s in   # after an early buzz, Sonnet has ~2 s (NSB) to finalize before we must answer
 
 
 def _capture():
@@ -214,6 +215,26 @@ async def _run(ws, client):
                              refining=True, mode="waiting", buzz=commit)
 
         t_buzz = time.monotonic()
+        took = {"overread": False}
+
+        async def overread():
+            await asyncio.sleep(OVERREAD_S)
+            heard = state["transcript"]
+            if state["gen"] != gen or len(heard.split()) <= len(qtext.split()):
+                return
+            try:
+                d = (await client.post(f"{LEBOT_URL}/analyze", json={
+                    "prefix": heard, "category": cat or "OTHER", "fast": True, "mode": MODE,
+                    "total_words": est_total(len(heard.split())), "history": leans})).json()
+            except Exception:
+                return
+            g = d.get("guess", "")
+            with _lock:
+                if (state["gen"] == gen and g and g.upper() != "UNKNOWN"
+                        and time.monotonic() - t_buzz <= ANSWER_WINDOW):
+                    state["answer"], took["overread"] = g, True
+        if commit:
+            asyncio.create_task(overread())
 
         async def finalize():
             try:
@@ -225,7 +246,7 @@ async def _run(ws, client):
             with _lock:
                 if state["gen"] != gen:
                     return
-                if commit and in_window and g and g.upper() != "UNKNOWN":
+                if commit and in_window and g and g.upper() != "UNKNOWN" and not took["overread"]:
                     state.update(answer=g, reasoning=d.get("reasoning", ""), resmode=d.get("mode", ""))
                 elif commit:
                     # past the answer window: the spoken answer is locked; only fill in the walkthrough
