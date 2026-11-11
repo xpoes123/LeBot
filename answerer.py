@@ -36,6 +36,7 @@ ASR_NOTE = ("This is a LIVE SPEECH TRANSCRIPT: words are often mis-heard as simi
             "science question before deciding anything.\n\n")
 MODEL = os.environ.get("LEBOT_MODEL", "claude-sonnet-4-6")       # System 2: thinking
 FAST = os.environ.get("LEBOT_FAST", "claude-haiku-4-5-20251001")  # System 1: subconscious
+GUESS = os.environ.get("LEBOT_GUESS", "claude-opus-4-8")  # running guesser: Opus 41% vs Sonnet 35% per tick, 0.94 s vs 1.04 s
 # Homelab Ollama (Tailscale) for the offline judge only; empty OLLAMA_URL = disabled.
 # num_ctx must stay 16384: the GPU is shared and any other value forces a model reload.
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
@@ -446,7 +447,7 @@ def anticipate_fast_confirm(prefix, category, n=3, force=False, haiku=True):
             fk = ex.submit(mc_fast, prefix, category, FAST)
             return fs.result(), fk.result(), "mc"
     with ThreadPoolExecutor(max_workers=2) as ex:
-        fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, force=force)))   # Sonnet
+        fs = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=GUESS, force=force)))   # Opus
         fk = ex.submit(lambda: _vote(anticipate_sa(prefix, category, n=n, model=FAST)) if haiku else "UNKNOWN")
         sonnet, haiku = fs.result(), fk.result()
     resolved, is_excl = resolve_exclusion(sonnet, prefix)
