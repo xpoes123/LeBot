@@ -374,8 +374,8 @@ def _gate(guess: str, buzz: dict, mode: str, prefix: str = ""):
     p = buzz["p_jev"]
     named = bool(guess and guess.upper() != "UNKNOWN")
     ok = named and p is not None and p >= t and (bool(buzz["agrees"]) or not need_agree)
-    if answerer.is_mc(prefix) and not answerer._MC_OPT.search(prefix):
-        ok = False   # MC answer must be a choice: stem-time free-text buzzes went 0/3 in rehearsal
+    if answerer.is_mc(prefix) and not (answerer._MC_OPT.search(prefix) and re.fullmatch(r"[WXYZ]", (guess or "").strip().upper())):
+        ok = False   # MC answer must be a choice letter: free-text MC buzzes (incl. stale ones after W) went 0/4 in rehearsal
     return {"p_gate": p, "gate_T": t, "gate_buzz": ok}
 
 
