@@ -35,3 +35,11 @@ def test_parrot_guard_catches_phrase_completion():
     assert answerer._parrots_stem("The Mid-Atlantic Ridge", "three types of faulting that occur at the Mid Atlantic Ridge.")
     assert not answerer.asked_yet(stem)                     # "when plotted" is a clause, not the ask
     assert answerer.asked_yet("how many seconds does it take")
+
+
+def test_no_mc_buzz_before_choices():
+    import server
+    buzz = {"p_jev": 0.99, "agrees": True}
+    stem = "Toss-up physics, multiple choice. The electric field is proportional to"
+    assert not server._gate("Linear dielectric", buzz, "full", stem)["gate_buzz"]
+    assert server._gate("Y", buzz, "full", stem + " which quantity? W, free charge density, X, current")["gate_buzz"]
