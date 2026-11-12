@@ -43,3 +43,4 @@ def test_no_mc_buzz_before_choices():
     stem = "Toss-up physics, multiple choice. The electric field is proportional to"
     assert not server._gate("Linear dielectric", buzz, "full", stem)["gate_buzz"]
     assert server._gate("Y", buzz, "full", stem + " which quantity? W, free charge density, X, current")["gate_buzz"]
+    assert not server._gate("Multiple of 3", buzz, "balanced", stem + " frame? W 1,000 X 2,000")["gate_buzz"]
